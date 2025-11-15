@@ -3,6 +3,8 @@ import { type Wallet as WalletType, type NFT, type Balance } from "@shared/schem
 import { useActiveAccount, useActiveWallet, useConnect } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import { client, baseChain } from "@/lib/web3";
+import { prepareContractCall, sendTransaction } from "thirdweb";
+import { getContract } from "thirdweb";
 
 interface Web3ContextType {
   wallet: WalletType | null;
@@ -20,12 +22,10 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<WalletType | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   
-  // Use Thirdweb hooks
   const activeAccount = useActiveAccount();
   const activeWallet = useActiveWallet();
   const { connect } = useConnect();
   
-  // Update wallet state when active account changes
   useEffect(() => {
     if (activeAccount && activeWallet) {
       setWallet({
@@ -41,9 +41,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     try {
-      // Connect using Thirdweb's connect function
       await connect(async () => {
-        const wallet = createWallet("io.metamask"); // Default to MetaMask
+        const wallet = createWallet("io.metamask");
         await wallet.connect({ client });
         return wallet;
       });
@@ -63,20 +62,37 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   }, [activeWallet]);
 
   const mintNFT = useCallback(async (): Promise<string> => {
-    if (!wallet || !activeAccount || !activeWallet) {
+    if (!activeAccount || !activeWallet) {
       throw new Error("Wallet not connected");
     }
     
     try {
-      const { mintNFT: executeMint } = await import("@/lib/web3");
-      // Pass the Thirdweb wallet and account instead of just the address
-      const txHash = await executeMint(activeAccount, activeWallet);
-      return txHash;
+      // Get the NFT contract
+      const contract = getContract({
+        client,
+        chain: baseChain,
+        address: "0x859078e89E58B0Ab0021755B95360f48fBa763dd", // Your contract address
+      });
+
+      // Prepare the mint transaction
+      const transaction = prepareContractCall({
+        contract,
+        method: "function mint(address to) payable",
+        params: [activeAccount.address],
+      });
+
+      // Send the transaction using Thirdweb
+      const result = await sendTransaction({
+        transaction,
+        account: activeAccount,
+      });
+
+      return result.transactionHash;
     } catch (error: any) {
       console.error("Mint error:", error);
       throw new Error(error.message || "Failed to mint NFT");
     }
-  }, [wallet, activeAccount, activeWallet]);
+  }, [activeAccount, activeWallet]);
 
   const getBalance = useCallback(async (): Promise<Balance> => {
     if (!wallet) {
