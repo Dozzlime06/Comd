@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { useActiveAccount, useActiveWallet } from "thirdweb/react";
-import { prepareContractCall, sendTransaction, readContract } from "thirdweb";
-import { defineChain, getContract } from "thirdweb";
+import { prepareContractCall, sendTransaction, readContract, getContract } from "thirdweb";
 import { createThirdwebClient } from "thirdweb";
 import { base } from "thirdweb/chains";
 
@@ -37,9 +36,9 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
 
-// Initialize Thirdweb client
+// Initialize Thirdweb client - GET YOUR CLIENT ID FROM https://thirdweb.com/dashboard
 const client = createThirdwebClient({
-  clientId: process.env.VITE_THIRDWEB_CLIENT_ID || "your-client-id-here",
+  clientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID || "your-client-id-here",
 });
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
@@ -110,8 +109,8 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         params: [wallet.address],
       });
 
-      // Get native ETH balance (you'll need to implement this based on your setup)
-      const nativeBalance = "0"; // Placeholder
+      // Get native ETH balance (placeholder for now)
+      const nativeBalance = "0";
 
       return {
         usdc: (Number(usdcBalance) / 1e6).toString(),
@@ -125,7 +124,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
 
   const getNFTs = useCallback(async (): Promise<NFT[]> => {
     if (!wallet) throw new Error("Wallet not connected");
-
+    
     // This needs to be implemented based on your NFT contract
     return [];
   }, [wallet]);
