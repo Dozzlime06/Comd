@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThirdwebProvider } from "thirdweb/react";
 import { Web3Provider } from "@/contexts/Web3Context";
+import { client } from "@/lib/web3";
 import Home from "@/pages/home";
 import NotFound from "@/pages/not-found";
 
@@ -20,7 +21,7 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThirdwebProvider>
+      <ThirdwebProvider client={client}>
         <Web3Provider>
           <TooltipProvider>
             <Toaster />
