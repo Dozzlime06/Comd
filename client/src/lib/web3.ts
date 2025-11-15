@@ -3,8 +3,8 @@ import { base } from "thirdweb/chains";
 import { createWallet, injectedProvider } from "thirdweb/wallets";
 import { ethers } from "ethers";
 
-// Thirdweb client ID
-const THIRDWEB_CLIENT_ID = "053fc1b5db7ca4a50a1d63e596228c09";
+// Thirdweb client ID - now reading from environment variable
+const THIRDWEB_CLIENT_ID = import.meta.env.VITE_THIRDWEB_CLIENT_ID || "053fc1b5db7ca4a50a1d63e596228c09";
 
 // NFT Contract address on Base
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
