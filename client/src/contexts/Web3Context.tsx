@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { useAccount, useWallet } from "@thirdweb-dev/react";
-import { ThirdwebSDK } from "@thirdweb-dev/sdk";
+import { useAddress, useSDK, useContract, useContractRead } from "@thirdweb-dev/react";
 import { ethers } from "ethers";
 
 interface Wallet {
@@ -40,81 +39,114 @@ const MINT_PRICE = ethers.utils.parseUnits("1", 6); // 1 USDC (6 decimals)
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  
+  // Use the correct hooks
+  const address = useAddress();
+  const sdk = useSDK();
 
-  const account = useAccount();
-  const connectedWallet = useWallet();
-
-  const sdk = new ThirdwebSDK("base"); // Base network
+  // Get contract instances
+  const { contract: usdcContract } = useContract(USDC_ADDRESS, "token");
+  const { contract: nftContract } = useContract(NFT_CONTRACT_ADDRESS, "nft-collection");
 
   useEffect(() => {
-    if (account && connectedWallet) {
+    if (address && sdk) {
       setWallet({
-        address: account.address,
+        address: address,
         chainId: BASE_CHAIN_ID,
         isConnected: true,
       });
     } else {
       setWallet(null);
     }
-  }, [account, connectedWallet]);
+  }, [address, sdk]);
 
   const checkUSDCBalance = useCallback(async (requiredAmount: ethers.BigNumber) => {
-    if (!wallet) return false;
-
-    const usdc = await sdk.getERC20(USDC_ADDRESS);
-    const balance = await usdc.balanceOf(wallet.address);
-    return balance.gte(requiredAmount);
-  }, [wallet, sdk]);
+    if (!wallet || !usdcContract) return false;
+    
+    try {
+      const balance = await usdcContract.erc20.balanceOf(wallet.address);
+      return balance.value.gte(requiredAmount);
+    } catch (error) {
+      console.error("Error checking USDC balance:", error);
+      return false;
+    }
+  }, [wallet, usdcContract]);
 
   const mintNFT = useCallback(async (): Promise<string> => {
     if (!wallet) throw new Error("Wallet not connected");
+    if (!sdk) throw new Error("SDK not initialized");
+    if (!usdcContract) throw new Error("USDC contract not loaded");
+    if (!nftContract) throw new Error("NFT contract not loaded");
 
-    // 1. Check USDC balance
-    const hasEnough = await checkUSDCBalance(MINT_PRICE);
-    if (!hasEnough) throw new Error("Insufficient USDC balance to mint.");
+    try {
+      // 1. Check USDC balance
+      const hasEnough = await checkUSDCBalance(MINT_PRICE);
+      if (!hasEnough) throw new Error("Insufficient USDC balance to mint.");
 
-    // 2. Approve NFT contract to spend USDC
-    const usdc = await sdk.getERC20(USDC_ADDRESS);
-    const approveTx = await usdc.approve(NFT_CONTRACT_ADDRESS, MINT_PRICE);
-    await approveTx.wait();
+      // 2. Approve NFT contract to spend USDC
+      console.log("Approving USDC...");
+      const approveTx = await usdcContract.erc20.setAllowance(
+        NFT_CONTRACT_ADDRESS,
+        MINT_PRICE.toString()
+      );
+      console.log("Approval tx:", approveTx);
 
-    // 3. Mint NFT
-    const nftContract = await sdk.getNFTCollection(NFT_CONTRACT_ADDRESS);
-    const mintTx = await nftContract.mintTo(wallet.address, {
-      name: `CMD402 NFT`,
-      description: "Minimalist 2D Terminal NFT",
-      image: "", // Optional: Add your IPFS or image URL
-    });
+      // 3. Mint NFT
+      console.log("Minting NFT...");
+      const mintTx = await nftContract.erc721.mint({
+        name: `CMD402 NFT`,
+        description: "Minimalist 2D Terminal NFT",
+        image: "", // Optional: Add your IPFS or image URL
+      });
 
-    return mintTx.receipt.transactionHash;
-  }, [wallet, sdk, checkUSDCBalance]);
+      return mintTx.receipt.transactionHash;
+    } catch (error) {
+      console.error("Mint error:", error);
+      throw error;
+    }
+  }, [wallet, sdk, usdcContract, nftContract, checkUSDCBalance]);
 
   const getBalance = useCallback(async (): Promise<Balance> => {
     if (!wallet) throw new Error("Wallet not connected");
+    if (!sdk) throw new Error("SDK not initialized");
+    if (!usdcContract) throw new Error("USDC contract not loaded");
 
-    const usdc = await sdk.getERC20(USDC_ADDRESS);
-    const usdcBalance = await usdc.balanceOf(wallet.address);
-    const nativeBalance = await sdk.getProvider().getBalance(wallet.address);
+    try {
+      // Get USDC balance
+      const usdcBalance = await usdcContract.erc20.balanceOf(wallet.address);
+      
+      // Get native ETH balance
+      const provider = sdk.getProvider();
+      const nativeBalance = await provider.getBalance(wallet.address);
 
-    return {
-      usdc: ethers.utils.formatUnits(usdcBalance, 6),
-      native: ethers.utils.formatEther(nativeBalance),
-    };
-  }, [wallet, sdk]);
+      return {
+        usdc: ethers.utils.formatUnits(usdcBalance.value, 6),
+        native: ethers.utils.formatEther(nativeBalance),
+      };
+    } catch (error) {
+      console.error("Error fetching balance:", error);
+      throw error;
+    }
+  }, [wallet, sdk, usdcContract]);
 
   const getNFTs = useCallback(async (): Promise<NFT[]> => {
     if (!wallet) throw new Error("Wallet not connected");
+    if (!nftContract) throw new Error("NFT contract not loaded");
 
-    const nftContract = await sdk.getNFTCollection(NFT_CONTRACT_ADDRESS);
-    const owned = await nftContract.getOwned(wallet.address);
-
-    return owned.map(nft => ({
-      tokenId: nft.metadata.id,
-      name: nft.metadata.name,
-      image: nft.metadata.image || "",
-      owner: nft.owner,
-    }));
-  }, [wallet, sdk]);
+    try {
+      const owned = await nftContract.erc721.getOwned(wallet.address);
+      
+      return owned.map(nft => ({
+        tokenId: nft.metadata.id,
+        name: nft.metadata.name || "Unnamed NFT",
+        image: nft.metadata.image || "",
+        owner: nft.owner,
+      }));
+    } catch (error) {
+      console.error("Error fetching NFTs:", error);
+      return [];
+    }
+  }, [wallet, nftContract]);
 
   return (
     <Web3Context.Provider
