@@ -50,24 +50,13 @@ export function Web3Provider({ children }: { children: ReactNode }) {
         inAppWallet(),
       ];
 
-      // Connect using Thirdweb's connect function with modal
-      const connectedWallet = await connect({
-        client,
-        wallets,
-        chain: baseChain,
-        appMetadata: {
-          name: "CMD402 NFT Terminal",
-          url: "https://cmd402.terminal",
-        },
-        connectModal: {
-          size: "wide",
-          title: "Connect Wallet",
-          titleIcon: "",
-          showThirdwebBranding: false,
-        },
+      // Connect using Thirdweb's connect function
+      await connect(async () => {
+        const wallet = createWallet("io.metamask"); // Default to MetaMask
+        await wallet.connect({ client });
+        return wallet;
       });
 
-      return;
     } catch (error) {
       console.error("Wallet connection error:", error);
       throw error;
@@ -151,4 +140,3 @@ export function useWeb3() {
   }
   return context;
 }
-
