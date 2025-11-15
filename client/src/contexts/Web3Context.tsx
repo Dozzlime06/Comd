@@ -8,7 +8,7 @@ interface Web3ContextType {
   wallet: WalletType | null;
   isConnecting: boolean;
   connectWallet: () => Promise<void>;
-  disconnectWallet: () => void;
+  disconnectWallet: () => Promise<void>;
   mintNFT: () => Promise<string>;
   getBalance: () => Promise<Balance>;
   getNFTs: () => Promise<NFT[]>;
@@ -41,22 +41,12 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     try {
-      // Create wallet options for the modal
-      const wallets = [
-        createWallet("io.metamask"),
-        createWallet("com.coinbase.wallet"),
-        createWallet("me.rainbow"),
-        createWallet("io.rabby"),
-        inAppWallet(),
-      ];
-
       // Connect using Thirdweb's connect function
       await connect(async () => {
         const wallet = createWallet("io.metamask"); // Default to MetaMask
         await wallet.connect({ client });
         return wallet;
       });
-
     } catch (error) {
       console.error("Wallet connection error:", error);
       throw error;
@@ -73,20 +63,25 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   }, [activeWallet]);
 
   const mintNFT = useCallback(async (): Promise<string> => {
-    if (!wallet) {
+    if (!wallet || !activeAccount || !activeWallet) {
       throw new Error("Wallet not connected");
     }
-
-    const { mintNFT: executeMint } = await import("@/lib/web3");
-    const txHash = await executeMint(wallet.address);
-    return txHash;
-  }, [wallet]);
+    
+    try {
+      const { mintNFT: executeMint } = await import("@/lib/web3");
+      // Pass the Thirdweb wallet and account instead of just the address
+      const txHash = await executeMint(activeAccount, activeWallet);
+      return txHash;
+    } catch (error: any) {
+      console.error("Mint error:", error);
+      throw new Error(error.message || "Failed to mint NFT");
+    }
+  }, [wallet, activeAccount, activeWallet]);
 
   const getBalance = useCallback(async (): Promise<Balance> => {
     if (!wallet) {
       throw new Error("Wallet not connected");
     }
-
     const { getUSDCBalance, getETHBalance } = await import("@/lib/web3");
     const [usdc, native] = await Promise.all([
       getUSDCBalance(wallet.address),
@@ -103,7 +98,6 @@ export function Web3Provider({ children }: { children: ReactNode }) {
     if (!wallet) {
       throw new Error("Wallet not connected");
     }
-
     const { getOwnedNFTs } = await import("@/lib/web3");
     const nfts = await getOwnedNFTs(wallet.address);
     
