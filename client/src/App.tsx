@@ -1,6 +1,6 @@
 import { ThirdwebProvider } from "@thirdweb-dev/react";
 import { Base } from "@thirdweb-dev/chains";
-import { Web3Provider } from "@/contexts/web3context.tsx";  // ← ADD .tsx
+import { Web3Provider } from "@/contexts/web3context.tsx";
 import { Terminal } from "@/components/terminal";
 
 function App() {
