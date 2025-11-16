@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
-import { useAddress, useSDK, useConnect, metamaskWallet, useConnectionStatus } from "@thirdweb-dev/react";
+import { createContext, useContext, ReactNode } from "react";
+import { useAddress, useSDK, useConnectionStatus } from "@thirdweb-dev/react";
 import { ethers } from "ethers";
 
 interface Wallet {
@@ -35,7 +35,7 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
 const BASE_CHAIN_ID = 8453;
-const TOKEN_ID = 0; // ERC1155 token ID - check sa thirdweb dashboard kung anong token ID
+const TOKEN_ID = 0;
 
 // ABIs
 const ERC20_ABI = [
@@ -45,7 +45,6 @@ const ERC20_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
 ];
 
-// ERC1155 Drop ABI - for claim function
 const DROP_ABI = [
   "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
   "function getActiveClaimConditionId(uint256 _tokenId) view returns (uint256)",
@@ -56,7 +55,6 @@ const DROP_ABI = [
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const address = useAddress();
   const sdk = useSDK();
-  const connect = useConnect();
   const connectionStatus = useConnectionStatus();
 
   const isConnecting = connectionStatus === "connecting";
@@ -67,17 +65,36 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     isConnected: true,
   } : null;
 
-  const connectWallet = useCallback(async () => {
+  const connectWallet = async () => {
     try {
-      const metamask = metamaskWallet();
-      await connect(metamask, { chainId: BASE_CHAIN_ID });
+      // Wait a bit for the button to be rendered
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Try to find and click the hidden ConnectWallet button
+      const connectButtons = document.querySelectorAll('button');
+      let thirdwebButton: HTMLButtonElement | null = null;
+      
+      // Find the Thirdweb connect button by checking button text or attributes
+      for (const button of Array.from(connectButtons)) {
+        const buttonText = button.textContent?.toLowerCase() || '';
+        if (buttonText.includes('connect') || buttonText.includes('wallet')) {
+          thirdwebButton = button;
+          break;
+        }
+      }
+      
+      if (thirdwebButton) {
+        thirdwebButton.click();
+      } else {
+        throw new Error("Connect button not found. Please refresh the page.");
+      }
     } catch (error) {
       console.error("Connection error:", error);
       throw error;
     }
-  }, [connect]);
+  };
 
-  const mintNFT = useCallback(async (): Promise<string> => {
+  const mintNFT = async (): Promise<string> => {
     if (!wallet || !sdk) throw new Error("Wallet not connected");
 
     try {
@@ -88,7 +105,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       const dropContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, DROP_ABI, signer);
       
-      // Get active claim condition
       const conditionId = await dropContract.getActiveClaimConditionId(TOKEN_ID);
       const condition = await dropContract.getClaimConditionById(TOKEN_ID, conditionId);
       
@@ -98,7 +114,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       console.log("Price per token:", ethers.utils.formatUnits(pricePerToken, 6), "USDC");
       console.log("Currency:", currency);
       
-      // If price > 0 and using USDC, approve
       if (pricePerToken.gt(0) && currency.toLowerCase() === USDC_ADDRESS.toLowerCase()) {
         console.log("Step 2: Checking USDC allowance...");
         
@@ -115,7 +130,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 4: Claiming NFT...");
       
-      // Claim parameters
       const quantity = 1;
       const allowlistProof = {
         proof: [],
@@ -158,9 +172,9 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       throw error;
     }
-  }, [wallet, sdk]);
+  };
 
-  const getBalance = useCallback(async (): Promise<Balance> => {
+  const getBalance = async (): Promise<Balance> => {
     if (!wallet || !sdk) throw new Error("Wallet not connected");
 
     try {
@@ -183,16 +197,15 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         native: "0",
       };
     }
-  }, [wallet, sdk]);
+  };
 
-  const getNFTs = useCallback(async (): Promise<NFT[]> => {
+  const getNFTs = async (): Promise<NFT[]> => {
     if (!wallet || !sdk) throw new Error("Wallet not connected");
     
     try {
       const provider = sdk.getProvider();
       const dropContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, DROP_ABI, provider);
       
-      // For ERC1155, check balance of token ID 0
       const balance = await dropContract.balanceOf(wallet.address, TOKEN_ID);
       
       if (balance.gt(0)) {
@@ -209,7 +222,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       console.error("Error fetching NFTs:", error);
       return [];
     }
-  }, [wallet, sdk]);
+  };
 
   return (
     <Web3Context.Provider
