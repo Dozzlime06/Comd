@@ -3,9 +3,8 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ThirdwebProvider } from "thirdweb/react";
+import { ThirdwebProvider } from "@thirdweb-dev/react";
 import { Web3Provider } from "@/contexts/Web3Context";
-import { client } from "@/lib/web3";
 import Home from "@/pages/home";
 import NotFound from "@/pages/not-found";
 
@@ -21,7 +20,10 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThirdwebProvider client={client}>
+      <ThirdwebProvider 
+        activeChain="base"
+        clientId={import.meta.env.VITE_THIRDWEB_CLIENT_ID || "053fc1b5db7ca4a50a1d63e596228c09"}
+      >
         <Web3Provider>
           <TooltipProvider>
             <Toaster />
