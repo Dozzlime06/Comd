@@ -1,8 +1,7 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useActiveAccount, useWalletBalance, useSendTransaction } from "thirdweb/react";
-import { getContract, readContract, prepareTransaction } from "thirdweb";
+import { getContract, readContract, prepareTransaction, prepareContractCall, sendTransaction } from "thirdweb";
 import { client, chain } from "@/lib/thirdweb";
-import { toHex } from "thirdweb/utils";
 
 interface Wallet {
   address: string;
@@ -36,6 +35,7 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
 const TOKEN_ID = 0;
+const MINT_PRICE = 1000000; // 1 USDC (6 decimals)
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
@@ -74,13 +74,52 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet || !account) throw new Error("Wallet not connected");
     
     try {
-      console.log("Step 1: Encoding claim transaction...");
+      console.log("Step 1: Checking USDC allowance...");
+      
+      const usdcContract = getContract({
+        client,
+        chain,
+        address: USDC_ADDRESS,
+      });
+      
+      // Check current allowance
+      const allowance = await readContract({
+        contract: usdcContract,
+        method: "function allowance(address,address) view returns (uint256)",
+        params: [wallet.address, NFT_CONTRACT_ADDRESS],
+      });
+      
+      console.log("Current allowance:", Number(allowance));
+      
+      // If allowance is less than mint price, approve
+      if (Number(allowance) < MINT_PRICE) {
+        console.log("Step 2: Approving USDC...");
+        
+        const approveTx = prepareContractCall({
+          contract: usdcContract,
+          method: "function approve(address,uint256) returns (bool)",
+          params: [NFT_CONTRACT_ADDRESS, BigInt(MINT_PRICE)],
+        });
+        
+        const approveResult = await sendTransaction({
+          transaction: approveTx,
+          account,
+        });
+        
+        console.log("✓ USDC approved:", approveResult.transactionHash);
+        
+        // Wait a bit for approval to be mined
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } else {
+        console.log("✓ USDC already approved");
+      }
+      
+      console.log("Step 3: Encoding claim transaction...");
       
       // Manual ABI encoding for claim function
-      // Function signature: claim(address,uint256,uint256,address,uint256,(bytes32[],uint256,uint256,address),bytes)
       const abiCoder = new (await import('ethers')).AbiCoder();
       
-      const functionSignature = "0x84bb1e42"; // keccak256("claim(address,uint256,uint256,address,uint256,(bytes32[],uint256,uint256,address),bytes)").slice(0,10)
+      const functionSignature = "0x84bb1e42"; // claim function selector
       
       const params = abiCoder.encode(
         ["address", "uint256", "uint256", "address", "uint256", "tuple(bytes32[],uint256,uint256,address)", "bytes"],
@@ -89,15 +128,15 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
           TOKEN_ID,
           1,
           USDC_ADDRESS,
-          1000000,
-          [[], 0, 1000000, USDC_ADDRESS],
+          MINT_PRICE,
+          [[], 0, MINT_PRICE, USDC_ADDRESS],
           "0x"
         ]
       );
       
       const data = functionSignature + params.slice(2);
       
-      console.log("Step 2: Preparing transaction...");
+      console.log("Step 4: Sending claim transaction...");
       
       const transaction = prepareTransaction({
         client,
@@ -106,8 +145,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         data: data,
         value: 0n,
       });
-      
-      console.log("Step 3: Sending transaction...");
       
       const result = await sendTx(transaction);
       
@@ -120,7 +157,11 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       if (error.message?.includes("rejected")) {
         throw new Error("Transaction rejected by user");
       } else if (error.message?.includes("insufficient")) {
-        throw new Error("Insufficient funds");
+        throw new Error("Insufficient USDC balance");
+      } else if (error.message?.includes("DropNoActiveCondition")) {
+        throw new Error("No active claim condition - contact admin");
+      } else if (error.message?.includes("DropClaimExceedLimit")) {
+        throw new Error("Already claimed maximum amount");
       }
       
       throw error;
