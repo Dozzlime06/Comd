@@ -33,8 +33,9 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 
 // Constants
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
+const NFT_CONTRACT_ADDRESS = "0x859078e89e58B0Ab0021755B95360f48fBa763dd";
 const BASE_CHAIN_ID = 8453;
+const MINT_PRICE_USDC = "1"; // 1 USDC
 
 // ABIs
 const ERC20_ABI = [
@@ -45,10 +46,9 @@ const ERC20_ABI = [
 ];
 
 const ERC721_ABI = [
-  "function mint(address to) payable returns (uint256)",
+  "function mint(address to) returns (uint256)",
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  "function mintPrice() view returns (uint256)",
 ];
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
@@ -84,43 +84,58 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       const signer = sdk.getSigner();
       if (!signer) throw new Error("No signer available");
       
-      console.log("Starting mint process...");
+      console.log("Step 1: Checking USDC balance...");
       
-      // Check if contract needs payment
-      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
+      // Check USDC balance
+      const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+      const balance = await usdcContract.balanceOf(wallet.address);
+      const decimals = await usdcContract.decimals();
+      const mintPrice = ethers.utils.parseUnits(MINT_PRICE_USDC, decimals);
       
-      // Try to get mint price (if contract has this function)
-      let mintPrice = ethers.BigNumber.from(0);
-      try {
-        mintPrice = await nftContract.mintPrice();
-        console.log("Mint price:", ethers.utils.formatEther(mintPrice), "ETH");
-      } catch (e) {
-        console.log("No mint price function, assuming free mint");
+      if (balance.lt(mintPrice)) {
+        throw new Error(`Insufficient USDC. You need ${MINT_PRICE_USDC} USDC to mint`);
       }
       
-      // Send mint transaction with value if needed
+      console.log("Step 2: Checking USDC allowance...");
+      
+      // Check current allowance
+      const currentAllowance = await usdcContract.allowance(wallet.address, NFT_CONTRACT_ADDRESS);
+      
+      // If allowance is less than mint price, approve
+      if (currentAllowance.lt(mintPrice)) {
+        console.log("Step 3: Approving USDC spend...");
+        const approveTx = await usdcContract.approve(NFT_CONTRACT_ADDRESS, mintPrice);
+        console.log("Approval tx sent:", approveTx.hash);
+        await approveTx.wait();
+        console.log("✓ USDC approved");
+      } else {
+        console.log("✓ USDC already approved");
+      }
+      
+      console.log("Step 4: Minting NFT...");
+      
+      // Now mint the NFT
+      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
       const tx = await nftContract.mint(wallet.address, {
-        value: mintPrice,
-        gasLimit: 300000, // Set gas limit to prevent stuck transactions
+        gasLimit: 300000,
       });
       
-      console.log("Transaction sent:", tx.hash);
+      console.log("Mint tx sent:", tx.hash);
       console.log("Waiting for confirmation...");
       
       const receipt = await tx.wait();
-      console.log("Transaction confirmed!");
+      console.log("✓ NFT minted successfully!");
       
       return receipt.transactionHash;
     } catch (error: any) {
       console.error("Mint error:", error);
       
-      // Better error messages
       if (error.code === 4001) {
         throw new Error("Transaction rejected by user");
-      } else if (error.code === -32603) {
-        throw new Error("Insufficient funds for gas");
+      } else if (error.message?.includes("Insufficient USDC")) {
+        throw error;
       } else if (error.message?.includes("execution reverted")) {
-        throw new Error("Contract rejected transaction - check mint requirements");
+        throw new Error("Mint failed - check if you have enough USDC");
       }
       
       throw error;
@@ -133,12 +148,10 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     try {
       const provider = sdk.getProvider();
       
-      // Get USDC balance
       const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
       const usdcBalance = await usdcContract.balanceOf(wallet.address);
       const usdcDecimals = await usdcContract.decimals();
       
-      // Get native ETH balance
       const nativeBalance = await provider.getBalance(wallet.address);
       
       return {
