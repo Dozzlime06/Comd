@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { useAddress, useSDK } from "@thirdweb-dev/react";
+import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { useAddress, useSDK, useConnect, metamaskWallet } from "@thirdweb-dev/react";
 import { ethers } from "ethers";
 
 interface Wallet {
@@ -23,6 +23,7 @@ interface NFT {
 interface Web3ContextType {
   wallet: Wallet | null;
   isConnecting: boolean;
+  connectWallet: () => Promise<void>;
   mintNFT: () => Promise<string>;
   getBalance: () => Promise<Balance>;
   getNFTs: () => Promise<NFT[]>;
@@ -48,29 +49,38 @@ const ERC721_ABI = [
 ];
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
-  const [wallet, setWallet] = useState<Wallet | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   
   const address = useAddress();
   const sdk = useSDK();
+  const connect = useConnect();
 
-  useEffect(() => {
-    if (address && sdk) {
-      setWallet({
-        address: address,
-        chainId: BASE_CHAIN_ID,
-        isConnected: true,
-      });
-    } else {
-      setWallet(null);
+  const wallet: Wallet | null = address && sdk ? {
+    address: address,
+    chainId: BASE_CHAIN_ID,
+    isConnected: true,
+  } : null;
+
+  const connectWallet = useCallback(async () => {
+    setIsConnecting(true);
+    try {
+      const metamask = metamaskWallet();
+      await connect(metamask, { chainId: BASE_CHAIN_ID });
+    } catch (error) {
+      console.error("Connection error:", error);
+      throw error;
+    } finally {
+      setIsConnecting(false);
     }
-  }, [address, sdk]);
+  }, [connect]);
 
   const mintNFT = useCallback(async (): Promise<string> => {
     if (!wallet || !sdk) throw new Error("Wallet not connected");
 
     try {
       const signer = sdk.getSigner();
+      if (!signer) throw new Error("No signer available");
+      
       const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
       
       const tx = await nftContract.mint(wallet.address);
@@ -147,6 +157,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       value={{
         wallet,
         isConnecting,
+        connectWallet,
         mintNFT,
         getBalance,
         getNFTs,
