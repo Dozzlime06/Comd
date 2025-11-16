@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTerminal } from "@/hooks/useTerminal";
 import { type TerminalLine } from "@shared/schema";
 import { ConnectButton } from "thirdweb/react";
-import { client, baseChain } from "@/lib/thirdweb";
+import { client, chain } from "@/lib/thirdweb";
 
 const ASCII_HEADER = `
  ██████╗███╗   ███╗██████╗ ██╗  ██╗ ██████╗ ██████╗ 
@@ -44,6 +44,7 @@ export function Terminal() {
       style={{ backgroundColor: "#0f0f0f" }}
       data-testid="terminal-container"
     >
+      {/* ASCII Header */}
       <div className="flex-shrink-0 px-6 pt-6 pb-4">
         <pre 
           className="text-foreground text-xs leading-tight select-none"
@@ -55,6 +56,7 @@ export function Terminal() {
         <div className="h-px bg-border my-4" />
       </div>
 
+      {/* Terminal Output Area */}
       <div 
         ref={scrollRef}
         className="flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6 space-y-1"
@@ -70,6 +72,7 @@ export function Terminal() {
           </div>
         ))}
 
+        {/* Current Input Line with Inline Cursor */}
         <div className="flex items-center font-mono text-sm leading-relaxed text-foreground">
           <span className="mr-2" data-testid="prompt-symbol">&gt;</span>
           <div className="flex-1 relative">
@@ -86,6 +89,7 @@ export function Terminal() {
               autoComplete="off"
               spellCheck="false"
             />
+            {/* Blinking Cursor */}
             <span
               className="absolute text-accent animate-blink pointer-events-none font-mono text-sm"
               style={{
@@ -99,6 +103,7 @@ export function Terminal() {
           </div>
         </div>
 
+        {/* Processing Indicator */}
         {isProcessing && (
           <div className="flex items-center space-x-2 text-accent font-mono text-sm" data-testid="processing-indicator">
             <span className="animate-pulse">Processing...</span>
@@ -106,6 +111,7 @@ export function Terminal() {
         )}
       </div>
 
+      {/* Status Bar */}
       <div 
         className="flex-shrink-0 px-6 py-3 border-t border-border flex items-center justify-between text-xs font-mono"
         data-testid="status-bar"
@@ -118,21 +124,12 @@ export function Terminal() {
         </div>
       </div>
 
-      {/* Fixed Connect Button - No createWallet needed */}
-      <div style={{ 
-        position: 'fixed', 
-        bottom: '-100px', 
-        left: '-100px',
-        opacity: 0,
-        pointerEvents: 'none'
-      }}>
-        <ConnectButton
+      {/* Hidden Thirdweb v5 Connect Button */}
+      <div id="thirdweb-connect-btn" style={{ position: 'absolute', left: '-9999px' }}>
+        <ConnectButton 
           client={client}
-          chain={baseChain}
-          connectModal={{
-            size: "compact",
-            title: "CMDX402 Terminal",
-          }}
+          chain={chain}
+          theme="dark"
         />
       </div>
     </div>
