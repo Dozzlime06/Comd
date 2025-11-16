@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
-import { useAddress, useSDK, useConnect, metamaskWallet } from "@thirdweb-dev/react";
+import { useAddress, useSDK, useConnect, metamaskWallet, useConnectionStatus } from "@thirdweb-dev/react";
 import { ethers } from "ethers";
 
 interface Wallet {
@@ -31,11 +31,11 @@ interface Web3ContextType {
 
 const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 
-// Constants
+// Constants - FIXED CHECKSUM
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const NFT_CONTRACT_ADDRESS = "0x859078e89e58B0Ab0021755B95360f48fBa763dd";
+const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd"; // Fixed capital E
 const BASE_CHAIN_ID = 8453;
-const MINT_PRICE_USDC = "1"; // 1 USDC
+const MINT_PRICE_USDC = "1";
 
 // ABIs
 const ERC20_ABI = [
@@ -52,11 +52,12 @@ const ERC721_ABI = [
 ];
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
-  const [isConnecting, setIsConnecting] = useState(false);
-  
   const address = useAddress();
   const sdk = useSDK();
   const connect = useConnect();
+  const connectionStatus = useConnectionStatus();
+
+  const isConnecting = connectionStatus === "connecting";
 
   const wallet: Wallet | null = address && sdk ? {
     address: address,
@@ -65,15 +66,12 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
   } : null;
 
   const connectWallet = useCallback(async () => {
-    setIsConnecting(true);
     try {
       const metamask = metamaskWallet();
       await connect(metamask, { chainId: BASE_CHAIN_ID });
     } catch (error) {
       console.error("Connection error:", error);
       throw error;
-    } finally {
-      setIsConnecting(false);
     }
   }, [connect]);
 
@@ -86,7 +84,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 1: Checking USDC balance...");
       
-      // Check USDC balance
       const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
       const balance = await usdcContract.balanceOf(wallet.address);
       const decimals = await usdcContract.decimals();
@@ -98,10 +95,8 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 2: Checking USDC allowance...");
       
-      // Check current allowance
       const currentAllowance = await usdcContract.allowance(wallet.address, NFT_CONTRACT_ADDRESS);
       
-      // If allowance is less than mint price, approve
       if (currentAllowance.lt(mintPrice)) {
         console.log("Step 3: Approving USDC spend...");
         const approveTx = await usdcContract.approve(NFT_CONTRACT_ADDRESS, mintPrice);
@@ -114,15 +109,12 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 4: Minting NFT...");
       
-      // Now mint the NFT
       const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
       const tx = await nftContract.mint(wallet.address, {
         gasLimit: 300000,
       });
       
       console.log("Mint tx sent:", tx.hash);
-      console.log("Waiting for confirmation...");
-      
       const receipt = await tx.wait();
       console.log("✓ NFT minted successfully!");
       
