@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useTerminal } from "@/hooks/useTerminal";
 import { type TerminalLine } from "@shared/schema";
-import { ConnectWallet } from "@thirdweb-dev/react";
+import { ConnectButton } from "thirdweb/react";
+import { client, baseChain } from "@/lib/thirdweb";
+import { createWallet } from "thirdweb/wallets";
 
 const ASCII_HEADER = `
  ██████╗███╗   ███╗██████╗ ██╗  ██╗ ██████╗ ██████╗ 
@@ -11,6 +13,13 @@ const ASCII_HEADER = `
 ╚██████╗██║ ╚═╝ ██║██████╔╝     ██║╚██████╔╝███████╗
  ╚═════╝╚═╝     ╚═╝╚═════╝      ╚═╝ ╚═════╝ ╚══════╝
 `;
+
+const wallets = [
+  createWallet("io.metamask"),
+  createWallet("com.coinbase.wallet"),
+  createWallet("me.rainbow"),
+  createWallet("com.okex.wallet"),
+];
 
 export function Terminal() {
   const { lines, currentInput, setCurrentInput, isProcessing, scrollRef, handleKeyDown } = useTerminal();
@@ -123,9 +132,23 @@ export function Terminal() {
         </div>
       </div>
 
-      {/* Hidden Thirdweb Connect Button - triggered programmatically */}
-      <div style={{ position: 'absolute', left: '-9999px', pointerEvents: 'none' }}>
-        <ConnectWallet theme="dark" />
+      {/* Thirdweb Connect Button - Hidden */}
+      <div style={{ 
+        position: 'fixed', 
+        bottom: '-100px', 
+        left: '-100px',
+        opacity: 0,
+        pointerEvents: 'none'
+      }}>
+        <ConnectButton
+          client={client}
+          wallets={wallets}
+          chain={baseChain}
+          connectModal={{
+            size: "compact",
+            title: "CMDX402 Terminal",
+          }}
+        />
       </div>
     </div>
   );
