@@ -1,10 +1,8 @@
 import { createContext, useContext, ReactNode } from "react";
-import { useActiveAccount, useActiveWallet } from "thirdweb/react";
+import { useActiveAccount } from "thirdweb/react";
 import { client, baseChain, USDC_ADDRESS, NFT_CONTRACT_ADDRESS, TOKEN_ID } from "@/lib/thirdweb";
-import { getContract, prepareContractCall, sendTransaction, readContract } from "thirdweb";
-import { approve, allowance, balanceOf as erc20BalanceOf, decimals } from "thirdweb/extensions/erc20";
-import { claimTo, balanceOf as erc1155BalanceOf } from "thirdweb/extensions/erc1155";
-import { defineChain } from "thirdweb/chains";
+import { getContract, sendTransaction, readContract, prepareContractCall } from "thirdweb";
+import { balanceOf as erc1155BalanceOf } from "thirdweb/extensions/erc1155";
 
 interface Wallet {
   address: string;
@@ -34,11 +32,94 @@ interface Web3ContextType {
 
 const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 
+// ERC20 ABI for USDC
+const ERC20_ABI = [
+  {
+    "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+    "name": "balanceOf",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "decimals",
+    "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "address", "name": "spender", "type": "address"},
+      {"internalType": "uint256", "name": "amount", "type": "uint256"}
+    ],
+    "name": "approve",
+    "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "address", "name": "owner", "type": "address"},
+      {"internalType": "address", "name": "spender", "type": "address"}
+    ],
+    "name": "allowance",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  }
+] as const;
+
+// ERC1155 Drop ABI
+const DROP_ABI = [
+  {
+    "inputs": [
+      {"internalType": "address", "name": "_receiver", "type": "address"},
+      {"internalType": "uint256", "name": "_tokenId", "type": "uint256"},
+      {"internalType": "uint256", "name": "_quantity", "type": "uint256"},
+      {"internalType": "address", "name": "_currency", "type": "address"},
+      {"internalType": "uint256", "name": "_pricePerToken", "type": "uint256"},
+      {
+        "components": [
+          {"internalType": "bytes32[]", "name": "proof", "type": "bytes32[]"},
+          {"internalType": "uint256", "name": "quantityLimitPerWallet", "type": "uint256"},
+          {"internalType": "uint256", "name": "pricePerToken", "type": "uint256"},
+          {"internalType": "address", "name": "currency", "type": "address"}
+        ],
+        "internalType": "struct IDropClaimCondition_V1.AllowlistProof",
+        "name": "_allowlistProof",
+        "type": "tuple"
+      },
+      {"internalType": "bytes", "name": "_data", "type": "bytes"}
+    ],
+    "name": "claim",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "address", "name": "account", "type": "address"},
+      {"internalType": "uint256", "name": "id", "type": "uint256"}
+    ],
+    "name": "balanceOf",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "uint256", "name": "_tokenId", "type": "uint256"}],
+    "name": "getActiveClaimConditionId",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  }
+] as const;
+
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
-  const wallet = useActiveWallet();
 
-  const isConnecting = wallet?.getConnectionStatus() === "connecting";
+  const isConnecting = false;
 
   const walletInfo: Wallet | null = account ? {
     address: account.address,
@@ -62,30 +143,30 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         client,
         chain: baseChain,
         address: USDC_ADDRESS,
+        abi: ERC20_ABI,
       });
 
       console.log("Step 2: Checking USDC allowance...");
       
-      const currentAllowance = await allowance({
+      const currentAllowance = await readContract({
         contract: usdcContract,
-        owner: account.address,
-        spender: NFT_CONTRACT_ADDRESS,
+        method: "function allowance(address owner, address spender) view returns (uint256)",
+        params: [account.address, NFT_CONTRACT_ADDRESS],
       });
 
-      // Price is typically set in the claim condition - adjust as needed
-      const pricePerToken = BigInt("1000000"); // 1 USDC (6 decimals)
+      const pricePerToken = BigInt("1000000"); // 1 USDC
 
       if (currentAllowance < pricePerToken) {
         console.log("Step 3: Approving USDC...");
         
-        const approveTransaction = approve({
+        const approveTx = prepareContractCall({
           contract: usdcContract,
-          spender: NFT_CONTRACT_ADDRESS,
-          amount: pricePerToken,
+          method: "function approve(address spender, uint256 amount) returns (bool)",
+          params: [NFT_CONTRACT_ADDRESS, pricePerToken],
         });
 
         await sendTransaction({
-          transaction: approveTransaction,
+          transaction: approveTx,
           account,
         });
 
@@ -94,15 +175,34 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
 
       console.log("Step 4: Claiming NFT...");
 
-      const claimTransaction = claimTo({
-        contract: nftContract,
-        to: account.address,
-        tokenId: BigInt(TOKEN_ID),
-        quantity: BigInt(1),
+      const nftContractWithAbi = getContract({
+        client,
+        chain: baseChain,
+        address: NFT_CONTRACT_ADDRESS,
+        abi: DROP_ABI,
+      });
+
+      const claimTx = prepareContractCall({
+        contract: nftContractWithAbi,
+        method: "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
+        params: [
+          account.address,
+          BigInt(TOKEN_ID),
+          BigInt(1),
+          USDC_ADDRESS,
+          pricePerToken,
+          {
+            proof: [],
+            quantityLimitPerWallet: BigInt(0),
+            pricePerToken: pricePerToken,
+            currency: USDC_ADDRESS,
+          },
+          "0x",
+        ],
       });
 
       const receipt = await sendTransaction({
-        transaction: claimTransaction,
+        transaction: claimTx,
         account,
       });
 
@@ -114,8 +214,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
 
       if (error.message?.includes("user rejected")) {
         throw new Error("Transaction rejected by user");
-      } else if (error.message?.includes("insufficient funds")) {
-        throw new Error("Insufficient funds for transaction");
       }
 
       throw error;
@@ -130,21 +228,24 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         client,
         chain: baseChain,
         address: USDC_ADDRESS,
+        abi: ERC20_ABI,
       });
 
-      const usdcBalance = await erc20BalanceOf({
+      const usdcBalance = await readContract({
         contract: usdcContract,
-        address: account.address,
+        method: "function balanceOf(address account) view returns (uint256)",
+        params: [account.address],
       });
 
-      const usdcDecimals = await decimals({ contract: usdcContract });
-
-      // For native balance, you'd need to use getRpcClient
-      const nativeBalance = "0"; // Simplified for now
+      const usdcDecimals = await readContract({
+        contract: usdcContract,
+        method: "function decimals() view returns (uint8)",
+        params: [],
+      });
 
       return {
-        usdc: (Number(usdcBalance) / Math.pow(10, usdcDecimals)).toFixed(6),
-        native: nativeBalance,
+        usdc: (Number(usdcBalance) / Math.pow(10, Number(usdcDecimals))).toFixed(6),
+        native: "0",
       };
     } catch (error) {
       console.error("Error fetching balance:", error);
@@ -163,12 +264,13 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         client,
         chain: baseChain,
         address: NFT_CONTRACT_ADDRESS,
+        abi: DROP_ABI,
       });
 
-      const balance = await erc1155BalanceOf({
+      const balance = await readContract({
         contract: nftContract,
-        owner: account.address,
-        tokenId: BigInt(TOKEN_ID),
+        method: "function balanceOf(address account, uint256 id) view returns (uint256)",
+        params: [account.address, BigInt(TOKEN_ID)],
       });
 
       if (balance > 0n) {
