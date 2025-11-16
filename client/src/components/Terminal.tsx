@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTerminal } from "@/hooks/useTerminal";
 import { type TerminalLine } from "@shared/schema";
+import { ConnectWallet } from "@thirdweb-dev/react";
 
 const ASCII_HEADER = `
  ██████╗███╗   ███╗██████╗ ██╗  ██╗ ██████╗ ██████╗ 
@@ -20,7 +21,6 @@ export function Terminal() {
       inputRef.current.focus();
     }
   }, [isProcessing, lines]);
-
 
   const getLineColor = (type: TerminalLine["type"]) => {
     switch (type) {
@@ -121,6 +121,16 @@ export function Terminal() {
         <div className="text-accent">
           Ready
         </div>
+      </div>
+
+      {/* Hidden Thirdweb Connect Button - triggered programmatically */}
+      <div style={{ position: 'absolute', left: '-9999px', pointerEvents: 'none' }}>
+        <ConnectWallet 
+          theme="dark"
+          btnTitle="Connect Wallet"
+          modalTitle="Sign in"
+          modalSize="compact"
+        />
       </div>
     </div>
   );
