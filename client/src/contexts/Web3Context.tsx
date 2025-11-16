@@ -1,8 +1,8 @@
 import { createContext, useContext, ReactNode } from "react";
-import { useActiveAccount, useWalletBalance } from "thirdweb/react";
-import { getContract, prepareContractCall, sendTransaction, readContract, getRpcClient } from "thirdweb";
+import { useActiveAccount, useWalletBalance, useSendTransaction } from "thirdweb/react";
+import { getContract, readContract, prepareTransaction } from "thirdweb";
 import { client, chain } from "@/lib/thirdweb";
-import { encodeFunctionData } from "thirdweb/utils";
+import { toHex } from "thirdweb/utils";
 
 interface Wallet {
   address: string;
@@ -39,6 +39,7 @@ const TOKEN_ID = 0;
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
+  const { mutateAsync: sendTx } = useSendTransaction();
   const { data: ethBalance } = useWalletBalance({
     client,
     chain,
@@ -73,37 +74,42 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet || !account) throw new Error("Wallet not connected");
     
     try {
-      console.log("Step 1: Getting contract...");
+      console.log("Step 1: Encoding claim transaction...");
       
-      const contract = getContract({
+      // Manual ABI encoding for claim function
+      // Function signature: claim(address,uint256,uint256,address,uint256,(bytes32[],uint256,uint256,address),bytes)
+      const abiCoder = new (await import('ethers')).AbiCoder();
+      
+      const functionSignature = "0x84bb1e42"; // keccak256("claim(address,uint256,uint256,address,uint256,(bytes32[],uint256,uint256,address),bytes)").slice(0,10)
+      
+      const params = abiCoder.encode(
+        ["address", "uint256", "uint256", "address", "uint256", "tuple(bytes32[],uint256,uint256,address)", "bytes"],
+        [
+          account.address,
+          TOKEN_ID,
+          1,
+          USDC_ADDRESS,
+          1000000,
+          [[], 0, 1000000, USDC_ADDRESS],
+          "0x"
+        ]
+      );
+      
+      const data = functionSignature + params.slice(2);
+      
+      console.log("Step 2: Preparing transaction...");
+      
+      const transaction = prepareTransaction({
         client,
         chain,
-        address: NFT_CONTRACT_ADDRESS,
-      });
-      
-      console.log("Step 2: Preparing claim transaction...");
-      
-      // Use the string method signature - simpler approach
-      const transaction = await prepareContractCall({
-        contract,
-        method: "function claim(address,uint256,uint256,address,uint256,(bytes32[],uint256,uint256,address),bytes)",
-        params: [
-          account.address,
-          BigInt(TOKEN_ID),
-          BigInt(1),
-          USDC_ADDRESS,
-          BigInt(1000000),
-          [[], BigInt(0), BigInt(1000000), USDC_ADDRESS],
-          "0x"
-        ],
+        to: NFT_CONTRACT_ADDRESS,
+        data: data,
+        value: 0n,
       });
       
       console.log("Step 3: Sending transaction...");
       
-      const result = await sendTransaction({
-        transaction,
-        account,
-      });
+      const result = await sendTx(transaction);
       
       console.log("✓ NFT claimed successfully!");
       
@@ -115,10 +121,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         throw new Error("Transaction rejected by user");
       } else if (error.message?.includes("insufficient")) {
         throw new Error("Insufficient funds");
-      } else if (error.message?.includes("DropNoActiveCondition")) {
-        throw new Error("No active claim condition");
-      } else if (error.message?.includes("DropClaimExceedLimit")) {
-        throw new Error("You've already claimed the maximum amount");
       }
       
       throw error;
