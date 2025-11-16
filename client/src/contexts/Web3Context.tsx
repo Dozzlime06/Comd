@@ -1,6 +1,6 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useActiveAccount } from "thirdweb/react";
-import { getContract, prepareContractCall, sendTransaction, readContract } from "thirdweb";
+import { getContract, prepareContractCall, sendTransaction, readContract, eth_getBalance } from "thirdweb";
 import { client, chain } from "@/lib/thirdweb";
 
 interface Wallet {
@@ -47,10 +47,8 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
 
   const connectWallet = async () => {
     try {
-      // Wait for button to render
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Find and click the hidden ConnectButton
       const container = document.getElementById('thirdweb-connect-btn');
       const button = container?.querySelector('button');
       
@@ -71,7 +69,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     try {
       console.log("Step 1: Getting contract...");
       
-      // Get the NFT contract
       const contract = getContract({
         client,
         chain,
@@ -80,29 +77,30 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 2: Preparing claim transaction...");
       
-      // Prepare the claim transaction
+      // Prepare allowlist proof as an array
+      const allowlistProof = [
+        [], // proof array
+        BigInt(0), // quantityLimitPerWallet
+        BigInt(1000000), // pricePerToken (1 USDC)
+        USDC_ADDRESS // currency
+      ];
+      
       const transaction = prepareContractCall({
         contract,
-        method: "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
+        method: "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[], uint256, uint256, address) _allowlistProof, bytes _data) payable",
         params: [
-          wallet.address, // receiver
-          BigInt(TOKEN_ID), // tokenId
-          BigInt(1), // quantity
-          USDC_ADDRESS, // currency
-          BigInt(1000000), // pricePerToken (1 USDC = 1000000)
-          {
-            proof: [],
-            quantityLimitPerWallet: BigInt(0),
-            pricePerToken: BigInt(1000000),
-            currency: USDC_ADDRESS
-          },
+          wallet.address,
+          BigInt(TOKEN_ID),
+          BigInt(1),
+          USDC_ADDRESS,
+          BigInt(1000000),
+          allowlistProof,
           "0x"
         ],
       });
       
       console.log("Step 3: Sending transaction...");
       
-      // Send the transaction
       const result = await sendTransaction({
         transaction,
         account,
@@ -118,6 +116,10 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         throw new Error("Transaction rejected by user");
       } else if (error.message?.includes("insufficient")) {
         throw new Error("Insufficient funds");
+      } else if (error.message?.includes("DropNoActiveCondition")) {
+        throw new Error("No active claim condition");
+      } else if (error.message?.includes("DropClaimExceedLimit")) {
+        throw new Error("You've already claimed the maximum amount");
       }
       
       throw error;
@@ -128,35 +130,40 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet) throw new Error("Wallet not connected");
     
     try {
-      // Get USDC contract
+      // Get USDC balance
       const usdcContract = getContract({
         client,
         chain,
         address: USDC_ADDRESS,
       });
       
-      // Read USDC balance
       const usdcBalance = await readContract({
         contract: usdcContract,
         method: "function balanceOf(address) view returns (uint256)",
         params: [wallet.address],
       });
       
-      // Format USDC balance (6 decimals)
-      const usdcFormatted = (Number(usdcBalance) / 1000000).toString();
+      const usdcFormatted = (Number(usdcBalance) / 1000000).toFixed(2);
       
-      // TODO: Get native ETH balance
-      const nativeBalance = "0";
+      // Get native ETH balance using Thirdweb v5
+      const ethBalanceWei = await eth_getBalance({
+        client,
+        chain,
+        address: wallet.address,
+      });
+      
+      // Convert from wei to ETH (18 decimals)
+      const ethBalanceFormatted = (Number(ethBalanceWei) / 1e18).toFixed(4);
       
       return {
         usdc: usdcFormatted,
-        native: nativeBalance,
+        native: ethBalanceFormatted,
       };
     } catch (error) {
       console.error("Error fetching balance:", error);
       return {
-        usdc: "0",
-        native: "0",
+        usdc: "0.00",
+        native: "0.00",
       };
     }
   };
@@ -165,14 +172,12 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet) throw new Error("Wallet not connected");
     
     try {
-      // Get NFT contract
       const nftContract = getContract({
         client,
         chain,
         address: NFT_CONTRACT_ADDRESS,
       });
       
-      // Read balance of token ID
       const balance = await readContract({
         contract: nftContract,
         method: "function balanceOf(address, uint256) view returns (uint256)",
