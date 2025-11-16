@@ -36,6 +36,32 @@ const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
 const TOKEN_ID = 0;
 
+// Full claim function ABI
+const CLAIM_ABI = {
+  type: "function",
+  name: "claim",
+  inputs: [
+    { name: "_receiver", type: "address" },
+    { name: "_tokenId", type: "uint256" },
+    { name: "_quantity", type: "uint256" },
+    { name: "_currency", type: "address" },
+    { name: "_pricePerToken", type: "uint256" },
+    {
+      name: "_allowlistProof",
+      type: "tuple",
+      components: [
+        { name: "proof", type: "bytes32[]" },
+        { name: "quantityLimitPerWallet", type: "uint256" },
+        { name: "pricePerToken", type: "uint256" },
+        { name: "currency", type: "address" }
+      ]
+    },
+    { name: "_data", type: "bytes" }
+  ],
+  outputs: [],
+  stateMutability: "payable"
+} as const;
+
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
   const { data: ethBalance } = useWalletBalance({
@@ -82,18 +108,25 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 2: Preparing claim transaction...");
       
-      // Create the transaction - let Thirdweb handle the ABI encoding
+      // Prepare allowlist proof
+      const allowlistProof = {
+        proof: [],
+        quantityLimitPerWallet: 0n,
+        pricePerToken: 1000000n,
+        currency: USDC_ADDRESS
+      };
+      
       const transaction = prepareContractCall({
         contract,
-        method: "claim",
+        method: CLAIM_ABI,
         params: [
-          account.address, // _receiver
-          TOKEN_ID, // _tokenId
-          1, // _quantity
-          USDC_ADDRESS, // _currency
-          1000000, // _pricePerToken
-          [[], 0, 1000000, USDC_ADDRESS], // _allowlistProof
-          "0x" // _data
+          account.address,
+          BigInt(TOKEN_ID),
+          1n,
+          USDC_ADDRESS,
+          1000000n,
+          allowlistProof,
+          "0x"
         ],
       });
       
@@ -128,7 +161,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet) throw new Error("Wallet not connected");
     
     try {
-      // Get USDC balance
       const usdcContract = getContract({
         client,
         chain,
@@ -143,7 +175,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       const usdcFormatted = (Number(usdcBalance) / 1000000).toFixed(2);
       
-      // Get ETH balance from hook
       const ethFormatted = ethBalance?.displayValue 
         ? parseFloat(ethBalance.displayValue).toFixed(4) 
         : "0.0000";
