@@ -1,175 +1,284 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
-import { useAddress, useSDK, useConnect, metamaskWallet } from "@thirdweb-dev/react";
-import { ethers } from "ethers";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { type TerminalLine, type CommandType } from "@shared/schema";
+import { useWeb3 } from "@/contexts/Web3Context";
+import { useToast } from "@/hooks/use-toast";
 
-interface Wallet {
-  address: string;
-  chainId: number;
-  isConnected: boolean;
-}
+export function useTerminal() {
+  const { wallet, connectWallet, getBalance, getNFTs, mintNFT, isConnecting } = useWeb3();
+  const { toast } = useToast();
+  const [lines, setLines] = useState<TerminalLine[]>([]);
+  const [currentInput, setCurrentInput] = useState("");
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-interface Balance {
-  usdc: string;
-  native: string;
-}
+  // Auto-scroll to bottom when new lines are added
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [lines]);
 
-interface NFT {
-  tokenId: string;
-  name: string;
-  image: string;
-  owner: string;
-}
+  // Initialize with welcome message
+  useEffect(() => {
+    const welcomeLines: TerminalLine[] = [
+      {
+        id: "welcome-1",
+        type: "info",
+        text: "CMD402 NFT Terminal v1.0.0",
+        timestamp: Date.now(),
+      },
+      {
+        id: "welcome-2",
+        type: "info",
+        text: "Base Chain NFT Minting Interface",
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "welcome-3",
+        type: "info",
+        text: "Contract: 0x859078e89E58B0Ab0021755B95360f48fBa763dd",
+        timestamp: Date.now() + 2,
+      },
+      {
+        id: "welcome-4",
+        type: "info",
+        text: "",
+        timestamp: Date.now() + 3,
+      },
+      {
+        id: "welcome-5",
+        type: "info",
+        text: "Type 'help' for available commands",
+        timestamp: Date.now() + 4,
+      },
+      {
+        id: "welcome-6",
+        type: "info",
+        text: "",
+        timestamp: Date.now() + 5,
+      },
+    ];
+    setLines(welcomeLines);
+  }, []);
 
-interface Web3ContextType {
-  wallet: Wallet | null;
-  isConnecting: boolean;
-  connectWallet: () => Promise<void>;
-  mintNFT: () => Promise<string>;
-  getBalance: () => Promise<Balance>;
-  getNFTs: () => Promise<NFT[]>;
-}
+  const addLine = useCallback((type: TerminalLine["type"], text: string) => {
+    const newLine: TerminalLine = {
+      id: `line-${Date.now()}-${Math.random()}`,
+      type,
+      text,
+      timestamp: Date.now(),
+    };
+    setLines((prev) => [...prev, newLine]);
+  }, []);
 
-const Web3Context = createContext<Web3ContextType | undefined>(undefined);
+  const executeCommand = useCallback(async (input: string) => {
+    if (!input.trim()) return;
 
-// Constants
-const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
-const BASE_CHAIN_ID = 8453; // Base mainnet chain ID
+    const trimmedInput = input.trim();
+    const command = trimmedInput.toLowerCase().split(" ")[0] as CommandType;
 
-// ABIs
-const ERC20_ABI = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function decimals() view returns (uint8)",
-];
+    // Add command to history
+    setCommandHistory((prev) => [...prev, trimmedInput]);
+    setHistoryIndex(-1);
 
-const ERC721_ABI = [
-  "function mint(address to) returns (uint256)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-];
+    // Display the command
+    addLine("command", `> ${trimmedInput}`);
 
-export const Web3Provider = ({ children }: { children: ReactNode }) => {
-  const [isConnecting, setIsConnecting] = useState(false);
-  
-  const address = useAddress();
-  const sdk = useSDK();
-  const connect = useConnect();
+    setIsProcessing(true);
 
-  const wallet: Wallet | null = address && sdk ? {
-    address: address,
-    chainId: BASE_CHAIN_ID,
-    isConnected: true,
-  } : null;
-
-  const connectWallet = useCallback(async () => {
-    setIsConnecting(true);
     try {
-      const metamask = metamaskWallet();
-      await connect(metamask, { chainId: BASE_CHAIN_ID });
+      switch (command) {
+        case "help":
+          addLine("output", "");
+          addLine("output", "Available commands:");
+          addLine("output", "  connect    - Connect your wallet to Base chain");
+          addLine("output", "  mint       - Mint a new NFT (requires USDC payment)");
+          addLine("output", "  balance    - Check your USDC and ETH balances");
+          addLine("output", "  nfts       - Display your NFT collection");
+          addLine("output", "  clear      - Clear terminal screen");
+          addLine("output", "  help       - Show this help message");
+          addLine("output", "");
+          break;
+
+        case "clear":
+          const welcomeLines: TerminalLine[] = [
+            {
+              id: "welcome-1",
+              type: "info",
+              text: "CMD402 NFT Terminal v1.0.0",
+              timestamp: Date.now(),
+            },
+            {
+              id: "welcome-2",
+              type: "info",
+              text: "Base Chain NFT Minting Interface",
+              timestamp: Date.now() + 1,
+            },
+            {
+              id: "welcome-3",
+              type: "info",
+              text: "Contract: 0x859078e89E58B0Ab0021755B95360f48fBa763dd",
+              timestamp: Date.now() + 2,
+            },
+            {
+              id: "welcome-4",
+              type: "info",
+              text: "",
+              timestamp: Date.now() + 3,
+            },
+            {
+              id: "welcome-5",
+              type: "info",
+              text: "Type 'help' for available commands",
+              timestamp: Date.now() + 4,
+            },
+            {
+              id: "welcome-6",
+              type: "info",
+              text: "",
+              timestamp: Date.now() + 5,
+            },
+          ];
+          setLines(welcomeLines);
+          break;
+
+        case "connect":
+          addLine("output", "");
+          if (wallet?.isConnected) {
+            addLine("info", `Already connected: ${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`);
+            addLine("info", `Chain ID: ${wallet.chainId} (Base)`);
+          } else {
+            addLine("info", "Initializing wallet connection...");
+            addLine("info", "Please approve the connection in your wallet");
+            try {
+              await connectWallet();
+              // Give a small delay for state to update
+              await new Promise(resolve => setTimeout(resolve, 500));
+              addLine("info", "✓ Wallet connected successfully");
+              addLine("info", "✓ Base Chain active");
+            } catch (error) {
+              addLine("error", `Connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+            }
+          }
+          addLine("output", "");
+          break;
+
+        case "mint":
+          addLine("output", "");
+          if (!wallet?.isConnected) {
+            addLine("error", "Wallet not connected. Run 'connect' first.");
+          } else {
+            addLine("info", "Preparing to mint NFT...");
+            addLine("info", "This requires USDC payment approval");
+            try {
+              const txHash = await mintNFT();
+              addLine("info", `✓ NFT minted successfully`);
+              addLine("info", `Transaction: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`);
+            } catch (error) {
+              addLine("error", `Mint failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+            }
+          }
+          addLine("output", "");
+          break;
+
+        case "balance":
+          addLine("output", "");
+          if (!wallet?.isConnected) {
+            addLine("error", "Wallet not connected. Run 'connect' first.");
+          } else {
+            addLine("info", "Fetching balances...");
+            try {
+              const balances = await getBalance();
+              addLine("output", "");
+              addLine("info", `USDC Balance: ${balances.usdc} USDC`);
+              addLine("info", `ETH Balance:  ${balances.native} ETH`);
+            } catch (error) {
+              addLine("error", `Failed to fetch balances: ${error instanceof Error ? error.message : "Unknown error"}`);
+            }
+          }
+          addLine("output", "");
+          break;
+
+        case "nfts":
+          addLine("output", "");
+          if (!wallet?.isConnected) {
+            addLine("error", "Wallet not connected. Run 'connect' first.");
+          } else {
+            addLine("info", "Loading your NFT collection...");
+            try {
+              const nfts = await getNFTs();
+              addLine("output", "");
+              if (nfts.length === 0) {
+                addLine("info", "No NFTs found in your wallet");
+              } else {
+                addLine("info", `Found ${nfts.length} NFT${nfts.length > 1 ? "s" : ""}:`);
+                nfts.forEach((nft, index) => {
+                  addLine("output", `  ${index + 1}. ${nft.name} (Token #${nft.tokenId})`);
+                });
+              }
+            } catch (error) {
+              addLine("error", `Failed to load NFTs: ${error instanceof Error ? error.message : "Unknown error"}`);
+            }
+          }
+          addLine("output", "");
+          break;
+
+        default:
+          addLine("error", `Command not found: ${command}`);
+          addLine("output", "Type 'help' for available commands");
+          addLine("output", "");
+      }
     } catch (error) {
-      console.error("Connection error:", error);
-      throw error;
+      addLine("error", `Error: ${error instanceof Error ? error.message : "Unknown error"}`);
+      addLine("output", "");
     } finally {
-      setIsConnecting(false);
+      setIsProcessing(false);
     }
-  }, [connect]);
+  }, [addLine, wallet, connectWallet, mintNFT, getBalance, getNFTs]);
 
-  const mintNFT = useCallback(async (): Promise<string> => {
-    if (!wallet || !sdk) throw new Error("Wallet not connected");
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (isProcessing) return;
 
-    try {
-      const signer = sdk.getSigner();
-      if (!signer) throw new Error("No signer available");
-      
-      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
-      
-      const tx = await nftContract.mint(wallet.address);
-      const receipt = await tx.wait();
-      
-      return receipt.hash;
-    } catch (error) {
-      console.error("Mint error:", error);
-      throw error;
-    }
-  }, [wallet, sdk]);
-
-  const getBalance = useCallback(async (): Promise<Balance> => {
-    if (!wallet || !sdk) throw new Error("Wallet not connected");
-
-    try {
-      const provider = sdk.getProvider();
-      
-      // Get USDC balance
-      const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
-      const usdcBalance = await usdcContract.balanceOf(wallet.address);
-      const usdcDecimals = await usdcContract.decimals();
-      
-      // Get native ETH balance
-      const nativeBalance = await provider.getBalance(wallet.address);
-      
-      return {
-        usdc: ethers.formatUnits(usdcBalance, usdcDecimals),
-        native: ethers.formatEther(nativeBalance),
-      };
-    } catch (error) {
-      console.error("Error fetching balance:", error);
-      return {
-        usdc: "0",
-        native: "0",
-      };
-    }
-  }, [wallet, sdk]);
-
-  const getNFTs = useCallback(async (): Promise<NFT[]> => {
-    if (!wallet || !sdk) throw new Error("Wallet not connected");
-    
-    try {
-      const provider = sdk.getProvider();
-      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, provider);
-      
-      const balance = await nftContract.balanceOf(wallet.address);
-      const balanceNum = Number(balance);
-      
-      const nfts: NFT[] = [];
-      for (let i = 0; i < balanceNum; i++) {
-        try {
-          const tokenId = await nftContract.tokenOfOwnerByIndex(wallet.address, i);
-          nfts.push({
-            tokenId: tokenId.toString(),
-            name: `NFT #${tokenId.toString()}`,
-            image: "",
-            owner: wallet.address,
-          });
-        } catch (err) {
-          console.error(`Error fetching NFT at index ${i}:`, err);
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (currentInput.trim()) {
+          executeCommand(currentInput);
+          setCurrentInput("");
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (commandHistory.length > 0) {
+          const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
+          setHistoryIndex(newIndex);
+          setCurrentInput(commandHistory[newIndex]);
+        }
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (historyIndex !== -1) {
+          const newIndex = historyIndex + 1;
+          if (newIndex >= commandHistory.length) {
+            setHistoryIndex(-1);
+            setCurrentInput("");
+          } else {
+            setHistoryIndex(newIndex);
+            setCurrentInput(commandHistory[newIndex]);
+          }
         }
       }
-      
-      return nfts;
-    } catch (error) {
-      console.error("Error fetching NFTs:", error);
-      return [];
-    }
-  }, [wallet, sdk]);
-
-  return (
-    <Web3Context.Provider
-      value={{
-        wallet,
-        isConnecting,
-        connectWallet,
-        mintNFT,
-        getBalance,
-        getNFTs,
-      }}
-    >
-      {children}
-    </Web3Context.Provider>
+    },
+    [currentInput, commandHistory, historyIndex, isProcessing, executeCommand]
   );
-};
 
-export function useWeb3() {
-  const context = useContext(Web3Context);
-  if (!context) throw new Error("useWeb3 must be used within a Web3Provider");
-  return context;
+  return {
+    lines,
+    currentInput,
+    setCurrentInput,
+    isProcessing,
+    scrollRef,
+    handleKeyDown,
+    addLine,
+  };
 }
