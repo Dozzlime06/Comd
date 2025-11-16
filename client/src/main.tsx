@@ -10,8 +10,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <ThirdwebProvider
       activeChain={Base}
       clientId={import.meta.env.VITE_THIRDWEB_CLIENT_ID}
-      // CRITICAL: Explicitly remove supportedWallets
-      supportedWallets={undefined}
     >
       <App />
     </ThirdwebProvider>
