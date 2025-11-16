@@ -34,18 +34,21 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 // Constants
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
-const BASE_CHAIN_ID = 8453; // Base mainnet chain ID
+const BASE_CHAIN_ID = 8453;
 
 // ABIs
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
 ];
 
 const ERC721_ABI = [
-  "function mint(address to) returns (uint256)",
+  "function mint(address to) payable returns (uint256)",
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+  "function mintPrice() view returns (uint256)",
 ];
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
@@ -81,14 +84,45 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       const signer = sdk.getSigner();
       if (!signer) throw new Error("No signer available");
       
+      console.log("Starting mint process...");
+      
+      // Check if contract needs payment
       const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
       
-      const tx = await nftContract.mint(wallet.address);
-      const receipt = await tx.wait();
+      // Try to get mint price (if contract has this function)
+      let mintPrice = ethers.BigNumber.from(0);
+      try {
+        mintPrice = await nftContract.mintPrice();
+        console.log("Mint price:", ethers.utils.formatEther(mintPrice), "ETH");
+      } catch (e) {
+        console.log("No mint price function, assuming free mint");
+      }
       
-      return receipt.hash;
-    } catch (error) {
+      // Send mint transaction with value if needed
+      const tx = await nftContract.mint(wallet.address, {
+        value: mintPrice,
+        gasLimit: 300000, // Set gas limit to prevent stuck transactions
+      });
+      
+      console.log("Transaction sent:", tx.hash);
+      console.log("Waiting for confirmation...");
+      
+      const receipt = await tx.wait();
+      console.log("Transaction confirmed!");
+      
+      return receipt.transactionHash;
+    } catch (error: any) {
       console.error("Mint error:", error);
+      
+      // Better error messages
+      if (error.code === 4001) {
+        throw new Error("Transaction rejected by user");
+      } else if (error.code === -32603) {
+        throw new Error("Insufficient funds for gas");
+      } else if (error.message?.includes("execution reverted")) {
+        throw new Error("Contract rejected transaction - check mint requirements");
+      }
+      
       throw error;
     }
   }, [wallet, sdk]);
@@ -108,8 +142,8 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       const nativeBalance = await provider.getBalance(wallet.address);
       
       return {
-        usdc: ethers.formatUnits(usdcBalance, usdcDecimals),
-        native: ethers.formatEther(nativeBalance),
+        usdc: ethers.utils.formatUnits(usdcBalance, usdcDecimals),
+        native: ethers.utils.formatEther(nativeBalance),
       };
     } catch (error) {
       console.error("Error fetching balance:", error);
