@@ -1,8 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { useActiveAccount, useActiveWallet } from "thirdweb/react";
-import { prepareContractCall, sendTransaction, readContract, getContract } from "thirdweb";
-import { createThirdwebClient } from "thirdweb";
-import { base } from "thirdweb/chains";
+import { useAddress, useSDK } from "@thirdweb-dev/react";
+import { ethers } from "ethers";
 
 interface Wallet {
   address: string;
@@ -35,99 +33,114 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 // Constants
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
+const BASE_CHAIN_ID = 8453; // Base mainnet chain ID
 
-// Initialize Thirdweb client - GET YOUR CLIENT ID FROM https://thirdweb.com/dashboard
-const client = createThirdwebClient({
-  clientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID || "your-client-id-here",
-});
+// ABIs
+const ERC20_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+];
+
+const ERC721_ABI = [
+  "function mint(address to) returns (uint256)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+];
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   
-  const account = useActiveAccount();
-  const activeWallet = useActiveWallet();
+  const address = useAddress();
+  const sdk = useSDK();
 
   useEffect(() => {
-    if (account && activeWallet) {
+    if (address && sdk) {
       setWallet({
-        address: account.address,
-        chainId: base.id,
+        address: address,
+        chainId: BASE_CHAIN_ID,
         isConnected: true,
       });
     } else {
       setWallet(null);
     }
-  }, [account, activeWallet]);
+  }, [address, sdk]);
 
   const mintNFT = useCallback(async (): Promise<string> => {
-    if (!wallet || !account) throw new Error("Wallet not connected");
+    if (!wallet || !sdk) throw new Error("Wallet not connected");
 
     try {
-      // Get NFT contract
-      const nftContract = getContract({
-        client,
-        chain: base,
-        address: NFT_CONTRACT_ADDRESS,
-      });
-
-      // Prepare mint transaction
-      const transaction = prepareContractCall({
-        contract: nftContract,
-        method: "function mint(address to)",
-        params: [wallet.address],
-      });
-
-      // Send transaction
-      const result = await sendTransaction({
-        transaction,
-        account,
-      });
-
-      return result.transactionHash;
+      const signer = sdk.getSigner();
+      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
+      
+      const tx = await nftContract.mint(wallet.address);
+      const receipt = await tx.wait();
+      
+      return receipt.hash;
     } catch (error) {
       console.error("Mint error:", error);
       throw error;
     }
-  }, [wallet, account]);
+  }, [wallet, sdk]);
 
   const getBalance = useCallback(async (): Promise<Balance> => {
-    if (!wallet || !account) throw new Error("Wallet not connected");
+    if (!wallet || !sdk) throw new Error("Wallet not connected");
 
     try {
-      // Get USDC contract
-      const usdcContract = getContract({
-        client,
-        chain: base,
-        address: USDC_ADDRESS,
-      });
-
-      // Read USDC balance
-      const usdcBalance = await readContract({
-        contract: usdcContract,
-        method: "function balanceOf(address) view returns (uint256)",
-        params: [wallet.address],
-      });
-
-      // Get native ETH balance (placeholder for now)
-      const nativeBalance = "0";
-
+      const provider = sdk.getProvider();
+      
+      // Get USDC balance
+      const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
+      const usdcBalance = await usdcContract.balanceOf(wallet.address);
+      const usdcDecimals = await usdcContract.decimals();
+      
+      // Get native ETH balance
+      const nativeBalance = await provider.getBalance(wallet.address);
+      
       return {
-        usdc: (Number(usdcBalance) / 1e6).toString(),
-        native: nativeBalance,
+        usdc: ethers.formatUnits(usdcBalance, usdcDecimals),
+        native: ethers.formatEther(nativeBalance),
       };
     } catch (error) {
       console.error("Error fetching balance:", error);
-      throw error;
+      return {
+        usdc: "0",
+        native: "0",
+      };
     }
-  }, [wallet, account]);
+  }, [wallet, sdk]);
 
   const getNFTs = useCallback(async (): Promise<NFT[]> => {
-    if (!wallet) throw new Error("Wallet not connected");
+    if (!wallet || !sdk) throw new Error("Wallet not connected");
     
-    // This needs to be implemented based on your NFT contract
-    return [];
-  }, [wallet]);
+    try {
+      const provider = sdk.getProvider();
+      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, provider);
+      
+      const balance = await nftContract.balanceOf(wallet.address);
+      const balanceNum = Number(balance);
+      
+      const nfts: NFT[] = [];
+      for (let i = 0; i < balanceNum; i++) {
+        try {
+          const tokenId = await nftContract.tokenOfOwnerByIndex(wallet.address, i);
+          nfts.push({
+            tokenId: tokenId.toString(),
+            name: `NFT #${tokenId.toString()}`,
+            image: "",
+            owner: wallet.address,
+          });
+        } catch (err) {
+          console.error(`Error fetching NFT at index ${i}:`, err);
+        }
+      }
+      
+      return nfts;
+    } catch (error) {
+      console.error("Error fetching NFTs:", error);
+      return [];
+    }
+  }, [wallet, sdk]);
 
   return (
     <Web3Context.Provider
