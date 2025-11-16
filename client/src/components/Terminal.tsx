@@ -129,7 +129,12 @@ export function Terminal() {
           theme="dark"
           btnTitle="Connect Wallet"
           modalTitle="Sign in"
-          modalSize="compact"
+          modalSize="wide"
+          welcomeScreen={{
+            title: "Welcome to CMDH02",
+            subtitle: "Connect your wallet to get started"
+          }}
+          switchToActiveChain={true}
         />
       </div>
     </div>
