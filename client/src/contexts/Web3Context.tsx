@@ -1,6 +1,6 @@
 import { createContext, useContext, ReactNode } from "react";
-import { useActiveAccount } from "thirdweb/react";
-import { getContract, prepareContractCall, sendTransaction, readContract, eth_getBalance } from "thirdweb";
+import { useActiveAccount, useWalletBalance } from "thirdweb/react";
+import { getContract, prepareContractCall, sendTransaction, readContract } from "thirdweb";
 import { client, chain } from "@/lib/thirdweb";
 
 interface Wallet {
@@ -38,6 +38,11 @@ const TOKEN_ID = 0;
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
+  const { data: ethBalance } = useWalletBalance({
+    client,
+    chain,
+    address: account?.address,
+  });
 
   const wallet: Wallet | null = account ? {
     address: account.address,
@@ -77,25 +82,18 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("Step 2: Preparing claim transaction...");
       
-      // Prepare allowlist proof as an array
-      const allowlistProof = [
-        [], // proof array
-        BigInt(0), // quantityLimitPerWallet
-        BigInt(1000000), // pricePerToken (1 USDC)
-        USDC_ADDRESS // currency
-      ];
-      
+      // Create the transaction - let Thirdweb handle the ABI encoding
       const transaction = prepareContractCall({
         contract,
-        method: "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[], uint256, uint256, address) _allowlistProof, bytes _data) payable",
+        method: "claim",
         params: [
-          wallet.address,
-          BigInt(TOKEN_ID),
-          BigInt(1),
-          USDC_ADDRESS,
-          BigInt(1000000),
-          allowlistProof,
-          "0x"
+          account.address, // _receiver
+          TOKEN_ID, // _tokenId
+          1, // _quantity
+          USDC_ADDRESS, // _currency
+          1000000, // _pricePerToken
+          [[], 0, 1000000, USDC_ADDRESS], // _allowlistProof
+          "0x" // _data
         ],
       });
       
@@ -145,25 +143,20 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       const usdcFormatted = (Number(usdcBalance) / 1000000).toFixed(2);
       
-      // Get native ETH balance using Thirdweb v5
-      const ethBalanceWei = await eth_getBalance({
-        client,
-        chain,
-        address: wallet.address,
-      });
-      
-      // Convert from wei to ETH (18 decimals)
-      const ethBalanceFormatted = (Number(ethBalanceWei) / 1e18).toFixed(4);
+      // Get ETH balance from hook
+      const ethFormatted = ethBalance?.displayValue 
+        ? parseFloat(ethBalance.displayValue).toFixed(4) 
+        : "0.0000";
       
       return {
         usdc: usdcFormatted,
-        native: ethBalanceFormatted,
+        native: ethFormatted,
       };
     } catch (error) {
       console.error("Error fetching balance:", error);
       return {
         usdc: "0.00",
-        native: "0.00",
+        native: "0.0000",
       };
     }
   };
