@@ -1,6 +1,6 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useActiveAccount, useWalletBalance, useSendTransaction } from "thirdweb/react";
-import { getContract, readContract, prepareTransaction } from "thirdweb";
+import { getContract, readContract, prepareTransaction, prepareContractCall, sendTransaction } from "thirdweb";
 import { client, chain } from "@/lib/thirdweb";
 import { ethers } from "ethers";
 
@@ -36,6 +36,7 @@ const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
 const TOKEN_ID = 0;
+const MINT_PRICE = 1000000n; // 1 USDC (6 decimals)
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
@@ -74,15 +75,51 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet || !account) throw new Error("Wallet not connected");
     
     try {
-      console.log("Step 1: Encoding claim transaction...");
+      console.log("Step 1: Checking USDC allowance...");
       
-      // Use ethers v6 AbiCoder
+      // Check USDC allowance
+      const usdcContract = getContract({
+        client,
+        chain,
+        address: USDC_ADDRESS,
+      });
+      
+      const allowance = await readContract({
+        contract: usdcContract,
+        method: "function allowance(address owner, address spender) view returns (uint256)",
+        params: [wallet.address, NFT_CONTRACT_ADDRESS],
+      });
+      
+      console.log("Current allowance:", allowance.toString());
+      
+      // If allowance is insufficient, approve first
+      if (BigInt(allowance) < MINT_PRICE) {
+        console.log("Step 2: Approving USDC...");
+        
+        const approveTransaction = prepareContractCall({
+          contract: usdcContract,
+          method: "function approve(address spender, uint256 amount) returns (bool)",
+          params: [NFT_CONTRACT_ADDRESS, MINT_PRICE],
+        });
+        
+        const approveResult = await sendTransaction({
+          transaction: approveTransaction,
+          account,
+        });
+        
+        console.log("✓ USDC approved:", approveResult.transactionHash);
+        
+        // Wait a bit for the approval to be confirmed
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } else {
+        console.log("✓ USDC already approved");
+      }
+      
+      console.log("Step 3: Encoding claim transaction...");
+      
       const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-      
-      // Function selector for claim(address,uint256,uint256,address,uint256,(bytes32[],uint256,uint256,address),bytes)
       const functionSelector = "0x84bb1e42";
       
-      // Encode parameters
       const encodedParams = abiCoder.encode(
         [
           "address",
@@ -98,15 +135,15 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
           TOKEN_ID,
           1,
           USDC_ADDRESS,
-          1000000,
-          [[], 0, 1000000, USDC_ADDRESS],
+          Number(MINT_PRICE),
+          [[], 0, Number(MINT_PRICE), USDC_ADDRESS],
           "0x"
         ]
       );
       
       const callData = functionSelector + encodedParams.slice(2);
       
-      console.log("Step 2: Preparing transaction...");
+      console.log("Step 4: Preparing claim transaction...");
       
       const transaction = prepareTransaction({
         client,
@@ -116,7 +153,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         value: 0n,
       });
       
-      console.log("Step 3: Sending transaction...");
+      console.log("Step 5: Sending claim transaction...");
       
       const result = await sendTx(transaction);
       
@@ -129,9 +166,13 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       if (error.message?.includes("rejected")) {
         throw new Error("Transaction rejected by user");
       } else if (error.message?.includes("insufficient")) {
-        throw new Error("Insufficient funds");
+        throw new Error("Insufficient USDC balance");
+      } else if (error.message?.includes("DropNoActiveCondition")) {
+        throw new Error("No active claim condition");
+      } else if (error.message?.includes("DropClaimExceedLimit")) {
+        throw new Error("Already claimed maximum amount");
       } else if (error.message?.includes("execution reverted")) {
-        throw new Error("Transaction failed - check claim conditions");
+        throw new Error("Claim failed - check if mint is active");
       }
       
       throw error;
