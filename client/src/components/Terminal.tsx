@@ -3,7 +3,6 @@ import { useTerminal } from "@/hooks/useTerminal";
 import { type TerminalLine } from "@shared/schema";
 import { ConnectButton } from "thirdweb/react";
 import { client, baseChain } from "@/lib/thirdweb";
-import { createWallet } from "thirdweb/wallets";
 
 const ASCII_HEADER = `
  ██████╗███╗   ███╗██████╗ ██╗  ██╗ ██████╗ ██████╗ 
@@ -13,12 +12,6 @@ const ASCII_HEADER = `
 ╚██████╗██║ ╚═╝ ██║██████╔╝     ██║╚██████╔╝███████╗
  ╚═════╝╚═╝     ╚═╝╚═════╝      ╚═╝ ╚═════╝ ╚══════╝
 `;
-
-const wallets = [
-  createWallet("io.metamask"),
-  createWallet("com.coinbase.wallet"),
-  createWallet("me.rainbow"),
-];
 
 export function Terminal() {
   const { lines, currentInput, setCurrentInput, isProcessing, scrollRef, handleKeyDown } = useTerminal();
@@ -125,6 +118,7 @@ export function Terminal() {
         </div>
       </div>
 
+      {/* Fixed Connect Button - No createWallet needed */}
       <div style={{ 
         position: 'fixed', 
         bottom: '-100px', 
@@ -134,7 +128,6 @@ export function Terminal() {
       }}>
         <ConnectButton
           client={client}
-          wallets={wallets}
           chain={baseChain}
           connectModal={{
             size: "compact",
