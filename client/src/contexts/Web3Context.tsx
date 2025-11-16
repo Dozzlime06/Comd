@@ -1,6 +1,6 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useActiveAccount, useWalletBalance, useSendTransaction } from "thirdweb/react";
-import { getContract, readContract, prepareTransaction, prepareContractCall, sendTransaction } from "thirdweb";
+import { getContract, readContract, prepareContractCall, sendTransaction, waitForReceipt } from "thirdweb";
 import { client, chain } from "@/lib/thirdweb";
 import { ethers } from "ethers";
 
@@ -75,26 +75,46 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!wallet || !account) throw new Error("Wallet not connected");
     
     try {
-      console.log("Step 1: Checking USDC allowance...");
+      console.log("=== Starting Mint Process ===");
+      console.log("Wallet:", wallet.address);
+      console.log("NFT Contract:", NFT_CONTRACT_ADDRESS);
+      console.log("USDC Address:", USDC_ADDRESS);
+      console.log("Mint Price:", MINT_PRICE.toString());
       
-      // Check USDC allowance
+      // Step 1: Check USDC balance
+      console.log("\n[1/5] Checking USDC balance...");
       const usdcContract = getContract({
         client,
         chain,
         address: USDC_ADDRESS,
       });
       
+      const balance = await readContract({
+        contract: usdcContract,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [wallet.address],
+      });
+      
+      console.log("USDC Balance:", balance.toString(), `(${(Number(balance) / 1000000).toFixed(2)} USDC)`);
+      
+      if (BigInt(balance) < MINT_PRICE) {
+        throw new Error(`Insufficient USDC balance. Need ${(Number(MINT_PRICE) / 1000000)} USDC, have ${(Number(balance) / 1000000).toFixed(2)} USDC`);
+      }
+      
+      // Step 2: Check allowance
+      console.log("\n[2/5] Checking USDC allowance...");
       const allowance = await readContract({
         contract: usdcContract,
         method: "function allowance(address owner, address spender) view returns (uint256)",
         params: [wallet.address, NFT_CONTRACT_ADDRESS],
       });
       
-      console.log("Current allowance:", allowance.toString());
+      console.log("Current Allowance:", allowance.toString());
       
-      // If allowance is insufficient, approve first
+      // Step 3: Approve if needed
       if (BigInt(allowance) < MINT_PRICE) {
-        console.log("Step 2: Approving USDC...");
+        console.log("\n[3/5] Approving USDC spend...");
+        console.log("Approving amount:", MINT_PRICE.toString());
         
         const approveTransaction = prepareContractCall({
           contract: usdcContract,
@@ -107,75 +127,147 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
           account,
         });
         
-        console.log("✓ USDC approved:", approveResult.transactionHash);
+        console.log("Approval TX Hash:", approveResult.transactionHash);
+        console.log("Waiting for approval confirmation...");
         
-        // Wait a bit for the approval to be confirmed
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Wait for approval confirmation
+        const receipt = await waitForReceipt({
+          client,
+          chain,
+          transactionHash: approveResult.transactionHash,
+        });
+        
+        console.log("✓ Approval confirmed! Block:", receipt.blockNumber);
       } else {
-        console.log("✓ USDC already approved");
+        console.log("\n[3/5] ✓ USDC already approved");
       }
       
-      console.log("Step 3: Encoding claim transaction...");
+      // Step 4: Prepare claim transaction
+      console.log("\n[4/5] Preparing claim transaction...");
       
-      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-      const functionSelector = "0x84bb1e42";
-      
-      const encodedParams = abiCoder.encode(
-        [
-          "address",
-          "uint256", 
-          "uint256",
-          "address",
-          "uint256",
-          "tuple(bytes32[],uint256,uint256,address)",
-          "bytes"
-        ],
-        [
-          account.address,
-          TOKEN_ID,
-          1,
-          USDC_ADDRESS,
-          Number(MINT_PRICE),
-          [[], 0, Number(MINT_PRICE), USDC_ADDRESS],
-          "0x"
-        ]
-      );
-      
-      const callData = functionSelector + encodedParams.slice(2);
-      
-      console.log("Step 4: Preparing claim transaction...");
-      
-      const transaction = prepareTransaction({
+      const nftContract = getContract({
         client,
         chain,
-        to: NFT_CONTRACT_ADDRESS,
-        data: callData,
-        value: 0n,
+        address: NFT_CONTRACT_ADDRESS,
       });
       
-      console.log("Step 5: Sending claim transaction...");
-      
-      const result = await sendTx(transaction);
-      
-      console.log("✓ NFT claimed successfully!");
-      
-      return result.transactionHash;
-    } catch (error: any) {
-      console.error("Mint error:", error);
-      
-      if (error.message?.includes("rejected")) {
-        throw new Error("Transaction rejected by user");
-      } else if (error.message?.includes("insufficient")) {
-        throw new Error("Insufficient USDC balance");
-      } else if (error.message?.includes("DropNoActiveCondition")) {
-        throw new Error("No active claim condition");
-      } else if (error.message?.includes("DropClaimExceedLimit")) {
-        throw new Error("Already claimed maximum amount");
-      } else if (error.message?.includes("execution reverted")) {
-        throw new Error("Claim failed - check if mint is active");
+      // Try using direct contract call instead of manual encoding
+      try {
+        console.log("Attempting direct contract call...");
+        
+        const claimTransaction = prepareContractCall({
+          contract: nftContract,
+          method: "function claim(address receiver, uint256 tokenId, uint256 quantity, address currency, uint256 pricePerToken, (bytes32[],uint256,uint256,address) allowlistProof, bytes data)",
+          params: [
+            account.address,      // receiver
+            BigInt(TOKEN_ID),     // tokenId
+            1n,                   // quantity
+            USDC_ADDRESS,         // currency
+            MINT_PRICE,           // pricePerToken
+            [[], 0n, MINT_PRICE, USDC_ADDRESS], // allowlistProof
+            "0x"                  // data
+          ],
+        });
+        
+        console.log("\n[5/5] Sending claim transaction...");
+        const result = await sendTx(claimTransaction);
+        
+        console.log("Claim TX Hash:", result.transactionHash);
+        console.log("✓ NFT claimed successfully!");
+        console.log("=== Mint Complete ===\n");
+        
+        return result.transactionHash;
+        
+      } catch (directCallError: any) {
+        console.error("Direct call failed:", directCallError);
+        console.log("\nFalling back to manual encoding...");
+        
+        // Fallback to manual encoding
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const functionSelector = "0x84bb1e42";
+        
+        const encodedParams = abiCoder.encode(
+          [
+            "address",
+            "uint256", 
+            "uint256",
+            "address",
+            "uint256",
+            "tuple(bytes32[],uint256,uint256,address)",
+            "bytes"
+          ],
+          [
+            account.address,
+            TOKEN_ID,
+            1,
+            USDC_ADDRESS,
+            Number(MINT_PRICE),
+            [[], 0, Number(MINT_PRICE), USDC_ADDRESS],
+            "0x"
+          ]
+        );
+        
+        const callData = functionSelector + encodedParams.slice(2);
+        console.log("Encoded call data:", callData);
+        
+        const transaction = {
+          to: NFT_CONTRACT_ADDRESS,
+          data: callData,
+          value: 0n,
+          chain,
+          client,
+        };
+        
+        console.log("\n[5/5] Sending manually encoded transaction...");
+        const result = await sendTx(transaction);
+        
+        console.log("Claim TX Hash:", result.transactionHash);
+        console.log("✓ NFT claimed successfully!");
+        console.log("=== Mint Complete ===\n");
+        
+        return result.transactionHash;
       }
       
-      throw error;
+    } catch (error: any) {
+      console.error("\n=== MINT ERROR ===");
+      console.error("Error type:", error.constructor.name);
+      console.error("Error message:", error.message);
+      console.error("Full error:", error);
+      
+      // Log stack trace if available
+      if (error.stack) {
+        console.error("Stack trace:", error.stack);
+      }
+      
+      // Log additional error properties
+      if (error.data) {
+        console.error("Error data:", error.data);
+      }
+      if (error.code) {
+        console.error("Error code:", error.code);
+      }
+      if (error.reason) {
+        console.error("Error reason:", error.reason);
+      }
+      
+      // Parse specific error messages
+      if (error.message?.includes("rejected") || error.message?.includes("denied")) {
+        throw new Error("Transaction rejected by user");
+      } else if (error.message?.includes("insufficient funds") || error.message?.includes("insufficient balance")) {
+        throw new Error("Insufficient USDC or ETH balance");
+      } else if (error.message?.includes("DropNoActiveCondition")) {
+        throw new Error("No active claim condition - minting may be paused");
+      } else if (error.message?.includes("DropClaimExceedLimit") || error.message?.includes("exceed")) {
+        throw new Error("Already claimed maximum amount");
+      } else if (error.message?.includes("allowance")) {
+        throw new Error("USDC allowance issue - try again");
+      } else if (error.message?.includes("execution reverted")) {
+        const revertReason = error.message.match(/reverted: (.+)/)?.[1] || "unknown reason";
+        throw new Error(`Transaction reverted: ${revertReason}`);
+      }
+      
+      // If we couldn't parse the error, throw the original
+      throw new Error(`Mint failed: ${error.message || "Unknown error - check console for details"}`);
     }
   };
 
@@ -196,7 +288,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       });
       
       const usdcFormatted = (Number(usdcBalance) / 1000000).toFixed(2);
-      
       const ethFormatted = ethBalance?.displayValue 
         ? parseFloat(ethBalance.displayValue).toFixed(4) 
         : "0.0000";
