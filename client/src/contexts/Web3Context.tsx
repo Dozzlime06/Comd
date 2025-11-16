@@ -1,8 +1,7 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useActiveAccount } from "thirdweb/react";
-import { client, baseChain, USDC_ADDRESS, NFT_CONTRACT_ADDRESS, TOKEN_ID } from "@/lib/thirdweb";
-import { getContract, sendTransaction, readContract, prepareContractCall } from "thirdweb";
-import { balanceOf as erc1155BalanceOf } from "thirdweb/extensions/erc1155";
+import { getContract, prepareContractCall, sendTransaction, readContract } from "thirdweb";
+import { client, chain } from "@/lib/thirdweb";
 
 interface Wallet {
   address: string;
@@ -25,6 +24,7 @@ interface NFT {
 interface Web3ContextType {
   wallet: Wallet | null;
   isConnecting: boolean;
+  connectWallet: () => Promise<void>;
   mintNFT: () => Promise<string>;
   getBalance: () => Promise<Balance>;
   getNFTs: () => Promise<NFT[]>;
@@ -32,220 +32,125 @@ interface Web3ContextType {
 
 const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 
-// ERC20 ABI for USDC
-const ERC20_ABI = [
-  {
-    "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
-    "name": "balanceOf",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "decimals",
-    "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {"internalType": "address", "name": "spender", "type": "address"},
-      {"internalType": "uint256", "name": "amount", "type": "uint256"}
-    ],
-    "name": "approve",
-    "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {"internalType": "address", "name": "owner", "type": "address"},
-      {"internalType": "address", "name": "spender", "type": "address"}
-    ],
-    "name": "allowance",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  }
-] as const;
-
-// ERC1155 Drop ABI
-const DROP_ABI = [
-  {
-    "inputs": [
-      {"internalType": "address", "name": "_receiver", "type": "address"},
-      {"internalType": "uint256", "name": "_tokenId", "type": "uint256"},
-      {"internalType": "uint256", "name": "_quantity", "type": "uint256"},
-      {"internalType": "address", "name": "_currency", "type": "address"},
-      {"internalType": "uint256", "name": "_pricePerToken", "type": "uint256"},
-      {
-        "components": [
-          {"internalType": "bytes32[]", "name": "proof", "type": "bytes32[]"},
-          {"internalType": "uint256", "name": "quantityLimitPerWallet", "type": "uint256"},
-          {"internalType": "uint256", "name": "pricePerToken", "type": "uint256"},
-          {"internalType": "address", "name": "currency", "type": "address"}
-        ],
-        "internalType": "struct IDropClaimCondition_V1.AllowlistProof",
-        "name": "_allowlistProof",
-        "type": "tuple"
-      },
-      {"internalType": "bytes", "name": "_data", "type": "bytes"}
-    ],
-    "name": "claim",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {"internalType": "address", "name": "account", "type": "address"},
-      {"internalType": "uint256", "name": "id", "type": "uint256"}
-    ],
-    "name": "balanceOf",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{"internalType": "uint256", "name": "_tokenId", "type": "uint256"}],
-    "name": "getActiveClaimConditionId",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  }
-] as const;
+const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
+const TOKEN_ID = 0;
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
   const account = useActiveAccount();
 
-  const isConnecting = false;
-
-  const walletInfo: Wallet | null = account ? {
+  const wallet: Wallet | null = account ? {
     address: account.address,
     chainId: 8453,
     isConnected: true,
   } : null;
 
-  const mintNFT = async (): Promise<string> => {
-    if (!account) throw new Error("Wallet not connected");
-
+  const connectWallet = async () => {
     try {
-      console.log("Step 1: Setting up contracts...");
+      // Wait for button to render
+      await new Promise(resolve => setTimeout(resolve, 100));
       
-      const nftContract = getContract({
-        client,
-        chain: baseChain,
-        address: NFT_CONTRACT_ADDRESS,
-      });
-
-      const usdcContract = getContract({
-        client,
-        chain: baseChain,
-        address: USDC_ADDRESS,
-        abi: ERC20_ABI,
-      });
-
-      console.log("Step 2: Checking USDC allowance...");
+      // Find and click the hidden ConnectButton
+      const container = document.getElementById('thirdweb-connect-btn');
+      const button = container?.querySelector('button');
       
-      const currentAllowance = await readContract({
-        contract: usdcContract,
-        method: "function allowance(address owner, address spender) view returns (uint256)",
-        params: [account.address, NFT_CONTRACT_ADDRESS],
-      });
-
-      const pricePerToken = BigInt("1000000"); // 1 USDC
-
-      if (currentAllowance < pricePerToken) {
-        console.log("Step 3: Approving USDC...");
-        
-        const approveTx = prepareContractCall({
-          contract: usdcContract,
-          method: "function approve(address spender, uint256 amount) returns (bool)",
-          params: [NFT_CONTRACT_ADDRESS, pricePerToken],
-        });
-
-        await sendTransaction({
-          transaction: approveTx,
-          account,
-        });
-
-        console.log("✓ USDC approved");
+      if (button) {
+        button.click();
+      } else {
+        throw new Error("Connect button not found. Please refresh the page.");
       }
+    } catch (error) {
+      console.error("Connection error:", error);
+      throw error;
+    }
+  };
 
-      console.log("Step 4: Claiming NFT...");
-
-      const nftContractWithAbi = getContract({
+  const mintNFT = async (): Promise<string> => {
+    if (!wallet || !account) throw new Error("Wallet not connected");
+    
+    try {
+      console.log("Step 1: Getting contract...");
+      
+      // Get the NFT contract
+      const contract = getContract({
         client,
-        chain: baseChain,
+        chain,
         address: NFT_CONTRACT_ADDRESS,
-        abi: DROP_ABI,
       });
-
-      const claimTx = prepareContractCall({
-        contract: nftContractWithAbi,
+      
+      console.log("Step 2: Preparing claim transaction...");
+      
+      // Prepare the claim transaction
+      const transaction = prepareContractCall({
+        contract,
         method: "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
         params: [
-          account.address,
-          BigInt(TOKEN_ID),
-          BigInt(1),
-          USDC_ADDRESS,
-          pricePerToken,
+          wallet.address, // receiver
+          BigInt(TOKEN_ID), // tokenId
+          BigInt(1), // quantity
+          USDC_ADDRESS, // currency
+          BigInt(1000000), // pricePerToken (1 USDC = 1000000)
           {
             proof: [],
             quantityLimitPerWallet: BigInt(0),
-            pricePerToken: pricePerToken,
-            currency: USDC_ADDRESS,
+            pricePerToken: BigInt(1000000),
+            currency: USDC_ADDRESS
           },
-          "0x",
+          "0x"
         ],
       });
-
-      const receipt = await sendTransaction({
-        transaction: claimTx,
+      
+      console.log("Step 3: Sending transaction...");
+      
+      // Send the transaction
+      const result = await sendTransaction({
+        transaction,
         account,
       });
-
+      
       console.log("✓ NFT claimed successfully!");
-      return receipt.transactionHash;
-
+      
+      return result.transactionHash;
     } catch (error: any) {
       console.error("Mint error:", error);
-
-      if (error.message?.includes("user rejected")) {
+      
+      if (error.message?.includes("rejected")) {
         throw new Error("Transaction rejected by user");
+      } else if (error.message?.includes("insufficient")) {
+        throw new Error("Insufficient funds");
       }
-
+      
       throw error;
     }
   };
 
   const getBalance = async (): Promise<Balance> => {
-    if (!account) throw new Error("Wallet not connected");
-
+    if (!wallet) throw new Error("Wallet not connected");
+    
     try {
+      // Get USDC contract
       const usdcContract = getContract({
         client,
-        chain: baseChain,
+        chain,
         address: USDC_ADDRESS,
-        abi: ERC20_ABI,
       });
-
+      
+      // Read USDC balance
       const usdcBalance = await readContract({
         contract: usdcContract,
-        method: "function balanceOf(address account) view returns (uint256)",
-        params: [account.address],
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [wallet.address],
       });
-
-      const usdcDecimals = await readContract({
-        contract: usdcContract,
-        method: "function decimals() view returns (uint8)",
-        params: [],
-      });
-
+      
+      // Format USDC balance (6 decimals)
+      const usdcFormatted = (Number(usdcBalance) / 1000000).toString();
+      
+      // TODO: Get native ETH balance
+      const nativeBalance = "0";
+      
       return {
-        usdc: (Number(usdcBalance) / Math.pow(10, Number(usdcDecimals))).toFixed(6),
-        native: "0",
+        usdc: usdcFormatted,
+        native: nativeBalance,
       };
     } catch (error) {
       console.error("Error fetching balance:", error);
@@ -257,31 +162,32 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
   };
 
   const getNFTs = async (): Promise<NFT[]> => {
-    if (!account) throw new Error("Wallet not connected");
-
+    if (!wallet) throw new Error("Wallet not connected");
+    
     try {
+      // Get NFT contract
       const nftContract = getContract({
         client,
-        chain: baseChain,
+        chain,
         address: NFT_CONTRACT_ADDRESS,
-        abi: DROP_ABI,
       });
-
+      
+      // Read balance of token ID
       const balance = await readContract({
         contract: nftContract,
-        method: "function balanceOf(address account, uint256 id) view returns (uint256)",
-        params: [account.address, BigInt(TOKEN_ID)],
+        method: "function balanceOf(address, uint256) view returns (uint256)",
+        params: [wallet.address, BigInt(TOKEN_ID)],
       });
-
-      if (balance > 0n) {
+      
+      if (Number(balance) > 0) {
         return [{
           tokenId: TOKEN_ID.toString(),
           name: `NFT #${TOKEN_ID} (x${balance.toString()})`,
           image: "",
-          owner: account.address,
+          owner: wallet.address,
         }];
       }
-
+      
       return [];
     } catch (error) {
       console.error("Error fetching NFTs:", error);
@@ -292,8 +198,9 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
   return (
     <Web3Context.Provider
       value={{
-        wallet: walletInfo,
-        isConnecting,
+        wallet,
+        isConnecting: false,
+        connectWallet,
         mintNFT,
         getBalance,
         getNFTs,
