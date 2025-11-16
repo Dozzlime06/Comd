@@ -125,17 +125,7 @@ export function Terminal() {
 
       {/* Hidden Thirdweb Connect Button - triggered programmatically */}
       <div style={{ position: 'absolute', left: '-9999px', pointerEvents: 'none' }}>
-        <ConnectWallet 
-          theme="dark"
-          btnTitle="Connect Wallet"
-          modalTitle="Sign in"
-          modalSize="wide"
-          welcomeScreen={{
-            title: "Welcome to CMDH02",
-            subtitle: "Connect your wallet to get started"
-          }}
-          switchToActiveChain={true}
-        />
+        <ConnectWallet theme="dark" />
       </div>
     </div>
   );
