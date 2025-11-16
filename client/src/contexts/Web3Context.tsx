@@ -26,7 +26,8 @@ interface Web3ContextType {
   wallet: Wallet | null;
   isConnecting: boolean;
   connectWallet: () => Promise<void>;
-  mintNFT: () => Promise<string>;
+  disconnectWallet: () => Promise<void>;
+  mintNFT: (quantity: number) => Promise<string>;
   getBalance: () => Promise<Balance>;
   getNFTs: () => Promise<NFT[]>;
 }
@@ -71,15 +72,59 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const mintNFT = async (): Promise<string> => {
+  const disconnectWallet = async () => {
+    try {
+      console.log("Disconnecting wallet...");
+      
+      // Click the thirdweb disconnect button
+      const container = document.getElementById('thirdweb-connect-btn');
+      const button = container?.querySelector('button');
+      
+      if (button && account) {
+        button.click();
+        
+        // Wait for dropdown/modal to appear, then click disconnect
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Try to find and click disconnect option
+        const disconnectButton = document.querySelector('[data-test="disconnect-wallet"]') || 
+                                 document.querySelector('button:has-text("Disconnect")') ||
+                                 Array.from(document.querySelectorAll('button')).find(
+                                   btn => btn.textContent?.toLowerCase().includes('disconnect')
+                                 );
+        
+        if (disconnectButton) {
+          (disconnectButton as HTMLElement).click();
+          console.log("✓ Wallet disconnected");
+        } else {
+          console.log("Note: Please disconnect manually from the wallet UI");
+        }
+      } else {
+        console.log("No wallet connected");
+      }
+    } catch (error) {
+      console.error("Disconnect error:", error);
+      throw error;
+    }
+  };
+
+  const mintNFT = async (quantity: number = 1): Promise<string> => {
     if (!wallet || !account) throw new Error("Wallet not connected");
+    
+    if (quantity < 1 || quantity > 100) {
+      throw new Error("Quantity must be between 1 and 100");
+    }
+    
+    const totalPrice = MINT_PRICE * BigInt(quantity);
     
     try {
       console.log("=== Starting Mint Process ===");
       console.log("Wallet:", wallet.address);
       console.log("NFT Contract:", NFT_CONTRACT_ADDRESS);
       console.log("USDC Address:", USDC_ADDRESS);
-      console.log("Mint Price:", MINT_PRICE.toString());
+      console.log("Quantity:", quantity);
+      console.log("Price per NFT:", (Number(MINT_PRICE) / 1000000).toFixed(2), "USDC");
+      console.log("Total Price:", (Number(totalPrice) / 1000000).toFixed(2), "USDC");
       
       // Step 1: Check USDC balance
       console.log("\n[1/5] Checking USDC balance...");
@@ -97,8 +142,8 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       console.log("USDC Balance:", balance.toString(), `(${(Number(balance) / 1000000).toFixed(2)} USDC)`);
       
-      if (BigInt(balance) < MINT_PRICE) {
-        throw new Error(`Insufficient USDC balance. Need ${(Number(MINT_PRICE) / 1000000)} USDC, have ${(Number(balance) / 1000000).toFixed(2)} USDC`);
+      if (BigInt(balance) < totalPrice) {
+        throw new Error(`Insufficient USDC balance. Need ${(Number(totalPrice) / 1000000).toFixed(2)} USDC, have ${(Number(balance) / 1000000).toFixed(2)} USDC`);
       }
       
       // Step 2: Check allowance
@@ -112,14 +157,14 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       console.log("Current Allowance:", allowance.toString());
       
       // Step 3: Approve if needed
-      if (BigInt(allowance) < MINT_PRICE) {
+      if (BigInt(allowance) < totalPrice) {
         console.log("\n[3/5] Approving USDC spend...");
-        console.log("Approving amount:", MINT_PRICE.toString());
+        console.log("Approving amount:", totalPrice.toString());
         
         const approveTransaction = prepareContractCall({
           contract: usdcContract,
           method: "function approve(address spender, uint256 amount) returns (bool)",
-          params: [NFT_CONTRACT_ADDRESS, MINT_PRICE],
+          params: [NFT_CONTRACT_ADDRESS, totalPrice],
         });
         
         const approveResult = await sendTransaction({
@@ -161,7 +206,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
           params: [
             account.address,      // receiver
             BigInt(TOKEN_ID),     // tokenId
-            1n,                   // quantity
+            BigInt(quantity),     // quantity
             USDC_ADDRESS,         // currency
             MINT_PRICE,           // pricePerToken
             [[], 0n, MINT_PRICE, USDC_ADDRESS], // allowlistProof
@@ -173,7 +218,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         const result = await sendTx(claimTransaction);
         
         console.log("Claim TX Hash:", result.transactionHash);
-        console.log("✓ NFT claimed successfully!");
+        console.log(`✓ ${quantity} NFT(s) claimed successfully!`);
         console.log("=== Mint Complete ===\n");
         
         return result.transactionHash;
@@ -199,7 +244,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
           [
             account.address,
             TOKEN_ID,
-            1,
+            quantity,
             USDC_ADDRESS,
             Number(MINT_PRICE),
             [[], 0, Number(MINT_PRICE), USDC_ADDRESS],
@@ -222,7 +267,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         const result = await sendTx(transaction);
         
         console.log("Claim TX Hash:", result.transactionHash);
-        console.log("✓ NFT claimed successfully!");
+        console.log(`✓ ${quantity} NFT(s) claimed successfully!`);
         console.log("=== Mint Complete ===\n");
         
         return result.transactionHash;
@@ -343,6 +388,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         wallet,
         isConnecting: false,
         connectWallet,
+        disconnectWallet,
         mintNFT,
         getBalance,
         getNFTs,
