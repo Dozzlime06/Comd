@@ -31,11 +31,11 @@ interface Web3ContextType {
 
 const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 
-// Constants - FIXED CHECKSUM
+// Constants
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd"; // Fixed capital E
+const NFT_CONTRACT_ADDRESS = "0x859078e89E58B0Ab0021755B95360f48fBa763dd";
 const BASE_CHAIN_ID = 8453;
-const MINT_PRICE_USDC = "1";
+const TOKEN_ID = 0; // ERC1155 token ID - check sa thirdweb dashboard kung anong token ID
 
 // ABIs
 const ERC20_ABI = [
@@ -45,10 +45,12 @@ const ERC20_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
 ];
 
-const ERC721_ABI = [
-  "function mint(address to) returns (uint256)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+// ERC1155 Drop ABI - for claim function
+const DROP_ABI = [
+  "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, tuple(bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
+  "function getActiveClaimConditionId(uint256 _tokenId) view returns (uint256)",
+  "function getClaimConditionById(uint256 _tokenId, uint256 _conditionId) view returns (tuple(uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata))",
+  "function balanceOf(address account, uint256 id) view returns (uint256)",
 ];
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
@@ -82,41 +84,63 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       const signer = sdk.getSigner();
       if (!signer) throw new Error("No signer available");
       
-      console.log("Step 1: Checking USDC balance...");
+      console.log("Step 1: Getting claim conditions...");
       
-      const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-      const balance = await usdcContract.balanceOf(wallet.address);
-      const decimals = await usdcContract.decimals();
-      const mintPrice = ethers.utils.parseUnits(MINT_PRICE_USDC, decimals);
+      const dropContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, DROP_ABI, signer);
       
-      if (balance.lt(mintPrice)) {
-        throw new Error(`Insufficient USDC. You need ${MINT_PRICE_USDC} USDC to mint`);
+      // Get active claim condition
+      const conditionId = await dropContract.getActiveClaimConditionId(TOKEN_ID);
+      const condition = await dropContract.getClaimConditionById(TOKEN_ID, conditionId);
+      
+      const pricePerToken = condition.pricePerToken;
+      const currency = condition.currency;
+      
+      console.log("Price per token:", ethers.utils.formatUnits(pricePerToken, 6), "USDC");
+      console.log("Currency:", currency);
+      
+      // If price > 0 and using USDC, approve
+      if (pricePerToken.gt(0) && currency.toLowerCase() === USDC_ADDRESS.toLowerCase()) {
+        console.log("Step 2: Checking USDC allowance...");
+        
+        const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+        const currentAllowance = await usdcContract.allowance(wallet.address, NFT_CONTRACT_ADDRESS);
+        
+        if (currentAllowance.lt(pricePerToken)) {
+          console.log("Step 3: Approving USDC...");
+          const approveTx = await usdcContract.approve(NFT_CONTRACT_ADDRESS, pricePerToken);
+          await approveTx.wait();
+          console.log("✓ USDC approved");
+        }
       }
       
-      console.log("Step 2: Checking USDC allowance...");
+      console.log("Step 4: Claiming NFT...");
       
-      const currentAllowance = await usdcContract.allowance(wallet.address, NFT_CONTRACT_ADDRESS);
+      // Claim parameters
+      const quantity = 1;
+      const allowlistProof = {
+        proof: [],
+        quantityLimitPerWallet: 0,
+        pricePerToken: pricePerToken,
+        currency: currency
+      };
       
-      if (currentAllowance.lt(mintPrice)) {
-        console.log("Step 3: Approving USDC spend...");
-        const approveTx = await usdcContract.approve(NFT_CONTRACT_ADDRESS, mintPrice);
-        console.log("Approval tx sent:", approveTx.hash);
-        await approveTx.wait();
-        console.log("✓ USDC approved");
-      } else {
-        console.log("✓ USDC already approved");
-      }
+      const tx = await dropContract.claim(
+        wallet.address,
+        TOKEN_ID,
+        quantity,
+        currency,
+        pricePerToken,
+        allowlistProof,
+        "0x",
+        {
+          value: currency === ethers.constants.AddressZero ? pricePerToken : 0,
+          gasLimit: 400000
+        }
+      );
       
-      console.log("Step 4: Minting NFT...");
-      
-      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, signer);
-      const tx = await nftContract.mint(wallet.address, {
-        gasLimit: 300000,
-      });
-      
-      console.log("Mint tx sent:", tx.hash);
+      console.log("Claim tx sent:", tx.hash);
       const receipt = await tx.wait();
-      console.log("✓ NFT minted successfully!");
+      console.log("✓ NFT claimed successfully!");
       
       return receipt.transactionHash;
     } catch (error: any) {
@@ -124,10 +148,12 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       
       if (error.code === 4001) {
         throw new Error("Transaction rejected by user");
-      } else if (error.message?.includes("Insufficient USDC")) {
-        throw error;
+      } else if (error.message?.includes("DropNoActiveCondition")) {
+        throw new Error("No active claim condition - contact admin");
+      } else if (error.message?.includes("DropClaimExceedLimit")) {
+        throw new Error("You've already claimed the maximum amount");
       } else if (error.message?.includes("execution reverted")) {
-        throw new Error("Mint failed - check if you have enough USDC");
+        throw new Error("Claim failed - check requirements");
       }
       
       throw error;
@@ -164,27 +190,21 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     
     try {
       const provider = sdk.getProvider();
-      const nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, provider);
+      const dropContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, DROP_ABI, provider);
       
-      const balance = await nftContract.balanceOf(wallet.address);
-      const balanceNum = Number(balance);
+      // For ERC1155, check balance of token ID 0
+      const balance = await dropContract.balanceOf(wallet.address, TOKEN_ID);
       
-      const nfts: NFT[] = [];
-      for (let i = 0; i < balanceNum; i++) {
-        try {
-          const tokenId = await nftContract.tokenOfOwnerByIndex(wallet.address, i);
-          nfts.push({
-            tokenId: tokenId.toString(),
-            name: `NFT #${tokenId.toString()}`,
-            image: "",
-            owner: wallet.address,
-          });
-        } catch (err) {
-          console.error(`Error fetching NFT at index ${i}:`, err);
-        }
+      if (balance.gt(0)) {
+        return [{
+          tokenId: TOKEN_ID.toString(),
+          name: `NFT #${TOKEN_ID} (x${balance.toString()})`,
+          image: "",
+          owner: wallet.address,
+        }];
       }
       
-      return nfts;
+      return [];
     } catch (error) {
       console.error("Error fetching NFTs:", error);
       return [];
