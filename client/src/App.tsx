@@ -1,7 +1,7 @@
 import { ThirdwebProvider } from "@thirdweb-dev/react";
 import { Base } from "@thirdweb-dev/chains";
-import { Web3Provider } from "@/contexts/Web3Context";  // ← Capital W and C!
-import { Terminal } from "@/components/terminal";
+import { Web3Provider } from "@/contexts/Web3Context";
+import { Terminal } from "@/components/Terminal";  // ← Capital T
 
 function App() {
   return (
